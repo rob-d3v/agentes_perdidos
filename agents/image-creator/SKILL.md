@@ -1,33 +1,50 @@
 ---
 name: image-creator
 description: >
-  Generates images for a project's missing/fallback assets using the best of two
-  APIs. Routes TRANSPARENT-background images (logos, mascots, icons, sprites, UI
-  frames) to OpenAI gpt-image-1.5, and NORMAL/photographic images (backgrounds,
-  hero art, banners, scenes) to Google Gemini "Nano Banana". Reads a project's
-  prompts.md, generates each asset, and writes it to the project's expected path
-  in the correct format. Use when a user asks to create/fill image assets for a project.
+  Generates images (and videos) for a project's missing/fallback assets using the best of
+  three APIs, with automatic fallback. Routes TRANSPARENT-background images (logos, mascots,
+  icons, sprites, UI frames) to OpenAI gpt-image-1.5, NORMAL/photographic images (backgrounds,
+  hero art, banners, scenes) to Google Gemini "Nano Banana", and VIDEO (animate a still,
+  text-to-video) to Kling AI. Reads a project's prompts.md, generates each asset, writes it
+  to the expected path in the correct format, and tracks estimated spend. Use when a user asks
+  to create/fill image or video assets for a project.
 ---
 
 # image-creator agent
 
-You create the images a project is waiting on. Typical job: the user opens a session,
-points you at THIS skill **and** at a target project's `prompts.md` (or a single prompt),
-and says "create these and drop them at the right paths." You decide the provider per
-image, run `imagegen.py`, and place each file with the correct extension.
+You create the images (and videos) a project is waiting on. Typical job: the user opens a
+session, points you at THIS skill **and** at a target project's `prompts.md` (or a single
+prompt), and says "create these and drop them at the right paths." You decide the provider per
+asset, run `imagegen.py`, and place each file with the correct extension. Every run logs an
+estimated cost so you (and the user) can watch spending.
 
-## The two engines (and why the split)
+## The three engines (and why the split)
 
-| | OpenAI `gpt-image-1.5` | Gemini `gemini-2.5-flash-image` ("Nano Banana") |
-|---|---|---|
-| **Transparency (alpha PNG)** | ✅ native (`background="transparent"`) | ❌ none — solid background only |
-| Best at | clean isolated subjects, logos, icons, sprites, anything cut-out; strong text rendering | photorealism, scenes, lighting, **iterative editing**, character consistency, multi-image fusion |
-| Sizes | 1024², 1536×1024, 1024×1536 | 1K native (2K/4K only on gemini-3 models); rich aspect ratios |
-| Cost (≈1024², high) | ~$0.13/img | ~$0.039/img (cheaper) |
-| Watermark | none | invisible SynthID on every output |
+| | OpenAI `gpt-image-1.5` | Gemini `gemini-2.5-flash-image` ("Nano Banana") | Kling AI |
+|---|---|---|---|
+| **Transparency (alpha PNG)** | ✅ native (`background="transparent"`) | ❌ none | ❌ none |
+| Best at | clean isolated subjects, logos, icons, sprites, cut-outs; strong text rendering | photorealism, scenes, lighting, **iterative editing**, character consistency, fusion | **VIDEO**: image→video, text→video, motion/physics, lip-sync, virtual try-on |
+| Image cost (≈1024², high) | ~$0.13/img | ~$0.039/img (cheapest) | ~$0.01/img |
+| Video | ❌ | ❌ | ✅ ~$0.07–0.14 / second |
+| Watermark | none | invisible SynthID | — |
 
 > ⚠️ `gpt-image-2` (OpenAI's flagship) does **NOT** support transparency — that's why the
-> transparent route pins `gpt-image-1.5`. Gemini has **no** alpha at all.
+> transparent route pins `gpt-image-1.5`. **Gemini and Kling have no alpha at all** — anything
+> needing a transparent background MUST go to OpenAI.
+> Kling's real strength is **video**, not still images — reach for it when the project wants
+> motion (animated hero, looping background, product spin), not just a static picture.
+
+## Fallback chain (automatic)
+
+With `--provider auto` (the default), `imagegen.py` picks a capability-ordered chain and
+falls through if a provider has no API key or its call fails (no credit, rate limit, error):
+
+- **Transparent image** → `[openai]` only. No fallback exists — Gemini/Kling can't do alpha.
+  If `OPENAI_API_KEY` is missing it errors and says so.
+- **Opaque image** → `[gemini → openai → kling]` (cheap & photoreal first, then capable, then Kling).
+- **Video** → Kling only.
+
+Force a single provider (no fallback) with `--provider openai|gemini|kling`.
 
 ## Decision matrix — pick the provider with these rules
 
@@ -69,12 +86,36 @@ uv run agents/image-creator/imagegen.py generate \
 
 # force a provider / pick a different model
 uv run .../imagegen.py generate --prompt "..." --out x.png --provider openai --model gpt-image-1.5
+
+# VIDEO via Kling — animate a still (image2video)
+uv run .../imagegen.py video --prompt "camera slowly pushes in, gentle wind" \
+  --ref hero.png --out hero.mp4 --duration 5 --kmode pro
+
+# VIDEO via Kling — text2video (no --ref)
+uv run .../imagegen.py video --prompt "drone shot over a canyon at sunset" \
+  --out clip.mp4 --aspect 16:9 --duration 5
+
+# spending so far (today / last 7 days / all-time, by provider)
+uv run .../imagegen.py usage
 ```
 
-Flags: `--transparent|--opaque` (default opaque) · `--provider auto|openai|gemini` (auto =
-follow the matrix) · `--aspect 1:1|16:9|9:16|3:4|4:3|...` · `--quality low|medium|high`
-(OpenAI) · `--image-size 1K|2K|4K` (Gemini-3 only) · `--ref <img>` (edit) · `--model <id>` ·
-`--json` (machine-readable result line).
+`generate` flags: `--transparent|--opaque` (default opaque) · `--provider auto|openai|gemini|kling`
+(auto = capability chain + fallback) · `--aspect 1:1|16:9|9:16|3:4|4:3|...` · `--quality
+low|medium|high` (OpenAI) · `--image-size 1K|2K|4K` (Gemini-3 only) · `--ref <img>` (edit) ·
+`--model <id>` · `--json`.
+
+`video` flags: `--prompt` · `--out *.mp4` · `--ref <img>` (omit → text2video) · `--aspect` ·
+`--duration 5|10` · `--kmode std|pro` · `--model`.
+
+## Cost tracking
+
+Every `generate`/`video` run appends an estimated cost to a local ledger
+(`agents/image-creator/.usage/ledger.jsonl`, gitignored) and prints a running line:
+`~$0.039 (est) via gemini | today ~$0.04 | 7d ~$0.04 | all-time ~$0.04`. Run
+`imagegen.py usage` any time for the today / 7-day / all-time breakdown by provider.
+Costs are **estimates** — providers bill by tokens/seconds/credits and prices drift;
+treat the numbers as a spend gauge, not an invoice. When batch-generating, report the
+running total to the user so they can stop if it climbs.
 
 ## Workflow when given a project's prompts.md
 
@@ -92,8 +133,12 @@ follow the matrix) · `--aspect 1:1|16:9|9:16|3:4|4:3|...` · `--quality low|med
 
 ## Gotchas
 
-- **Aspect ratios**: OpenAI snaps to 1024²/1536×1024/1024×1536; Gemini honors the exact ratio.
+- **Aspect ratios**: OpenAI snaps to 1024²/1536×1024/1024×1536; Gemini & Kling honor the exact ratio.
 - OpenAI image endpoints need **org verification** (403 otherwise). Gemini free tier ≈ 500 req/day.
 - Failed/blocked OpenAI prompts still consume quota — fix prompts before retry-storming.
+- **Kling**: needs a prepaid resource pack — a `429` means no active credit/quota (not an auth
+  problem). JWT auth is minted per call (30-min expiry). Video is async (~30–120s) and billed by
+  the second — keep clips short while iterating. Result URLs are temporary; the script downloads
+  immediately. No alpha output.
 - Model names drift; if a call 404s, override `--model` or update `.env`. Defaults are pinned
   in `imagegen.py` and documented in `.env.example`.

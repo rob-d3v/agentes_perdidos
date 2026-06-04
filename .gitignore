@@ -19,9 +19,10 @@ uv.lock
 Thumbs.db
 .DS_Store
 
-# Generated image scratch / logs
+# Generated image scratch / logs / usage ledger
 agents/*/output/
 agents/*/.cache/
+agents/*/.usage/
 *.log
 
 # LLM Wiki raw assets that are large (keep markdown, ignore heavy binaries if desired)

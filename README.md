@@ -15,7 +15,7 @@ reads its instructions and executes.
 
 | Agent | What it does | Folder |
 |---|---|---|
-| **image-creator** | Generates missing/fallback image assets. Routes transparent images (logos, icons, mascots) to OpenAI `gpt-image-1.5` and normal/photographic images (backgrounds, banners) to Gemini "Nano Banana". Reads a project's `prompts.md` and drops files at the right paths. | [`agents/image-creator/`](agents/image-creator/) |
+| **image-creator** | Generates missing/fallback image & video assets across 3 APIs with auto-fallback: transparent images → OpenAI `gpt-image-1.5`, normal/photographic → Gemini "Nano Banana", video → Kling AI. Reads a project's `prompts.md`, drops files at the right paths, tracks estimated spend. | [`agents/image-creator/`](agents/image-creator/) |
 | **llm-wiki** | Personal knowledge-base librarian (Karpathy "LLM Wiki" pattern). Incrementally builds and maintains a persistent, interlinked markdown wiki from raw sources — ingest, query, lint. | [`agents/llm-wiki/`](agents/llm-wiki/) |
 
 ## How to use an agent
@@ -51,4 +51,5 @@ new env vars in `.env.example`, and add a row to the table above.
 ## Secrets
 
 Keys live in `.env` only (gitignored). Each agent documents which keys it needs in its
-`SKILL.md`/`README.md` and in `.env.example`. Currently: `OPENAI_API_KEY`, `GEMINI_API_KEY`.
+`SKILL.md`/`README.md` and in `.env.example`. Currently: `OPENAI_API_KEY`, `GEMINI_API_KEY`,
+`KLING_ACCESS_KEY`, `KLING_SECRET_KEY`.

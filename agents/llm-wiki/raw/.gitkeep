@@ -1,0 +1,2 @@
+# Drop raw source documents here (articles, papers, notes, data, images).
+# Immutable — the agent reads from here but never edits these files.

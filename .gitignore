@@ -1,0 +1,29 @@
+# Secrets — NEVER commit
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv/
+*.egg-info/
+.pytest_cache/
+
+# uv
+uv.lock
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Generated image scratch / logs
+agents/*/output/
+agents/*/.cache/
+*.log
+
+# LLM Wiki raw assets that are large (keep markdown, ignore heavy binaries if desired)
+# (commented out by default — uncomment if raw/ gets heavy)
+# llm-wiki/raw/assets/

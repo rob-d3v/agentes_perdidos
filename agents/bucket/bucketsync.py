@@ -48,6 +48,9 @@ ASSET_EXT = IMAGE | VIDEO | AUDIO | FONT | DOC
 
 SRC_EXT = {".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".html", ".htm",
            ".css", ".scss", ".sass", ".less", ".json", ".md", ".mdx", ".astro"}
+# Files we actually REWRITE (real code/markup) — never docs or json maps/data.
+REWRITE_EXT = {".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".html", ".htm",
+               ".css", ".scss", ".sass", ".less", ".astro"}
 IGNORE_DIRS = {"node_modules", ".git", "dist", "build", ".next", "out", "target",
                ".venv", "venv", "__pycache__", ".cache", "coverage", ".turbo",
                "dist-electron", ".gradle", "vendor"}
@@ -284,7 +287,8 @@ def upload(project: str, assets: list[Asset], prefer: str, dry: bool,
         cache = "public, max-age=31536000, immutable"
         print(f"  [{a.provider}] {a.rel}  ({a.size//1024} KB, {a.category})  -> {a.key}")
         if dry:
-            mapping.update({r.raw: a.public_url for r in a.refs if not r.is_import})
+            mapping.update({r.raw: a.public_url for r in a.refs
+                            if not r.is_import and "/" in r.raw})
             continue
         cli = clients.setdefault(a.provider, _s3(a.provider))
         exists = False
@@ -298,7 +302,7 @@ def upload(project: str, assets: list[Asset], prefer: str, dry: bool,
             cli.upload_file(a.abspath, bkt, a.key,
                             ExtraArgs={"ContentType": ctype, "CacheControl": cache})
         for r in a.refs:
-            if not r.is_import:
+            if not r.is_import and "/" in r.raw:  # skip bare filenames (ambiguous/risky)
                 mapping[r.raw] = a.public_url
     return mapping
 
@@ -306,20 +310,23 @@ def upload(project: str, assets: list[Asset], prefer: str, dry: bool,
 # ── rewrite ─────────────────────────────────────────────────────────────────
 def rewrite(root: Path, mapping: dict[str, str], dry: bool, backup: bool) -> int:
     root = root.resolve()
-    # longest tokens first so we don't partially replace a longer path
+    if not mapping:
+        return 0
+    # Single-pass replace via one regex (longest tokens first). One scan means an
+    # inserted URL is never re-scanned, so a key that's a substring of a value
+    # (e.g. the filename inside the new URL) can't cause doubling.
     pairs = sorted(mapping.items(), key=lambda kv: len(kv[0]), reverse=True)
+    table = dict(pairs)
+    pattern = re.compile("|".join(re.escape(k) for k, _ in pairs))
     changed = 0
     for f in iter_files(root):
-        if f.suffix.lower() not in SRC_EXT:
+        if f.suffix.lower() not in REWRITE_EXT:
             continue
         try:
             text = f.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        new = text
-        for old, url in pairs:
-            if old in new:
-                new = new.replace(old, url)
+        new = pattern.sub(lambda m: table[m.group(0)], text)
         if new != text:
             changed += 1
             rel = f.relative_to(root)

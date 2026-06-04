@@ -16,6 +16,7 @@ reads its instructions and executes.
 | Agent | What it does | Folder |
 |---|---|---|
 | **image-creator** | Generates missing/fallback image & video assets across 3 APIs with auto-fallback: transparent images → OpenAI `gpt-image-1.5`, normal/photographic → Gemini "Nano Banana", video → Kling AI. Reads a project's `prompts.md`, drops files at the right paths, tracks estimated spend. | [`agents/image-creator/`](agents/image-creator/) |
+| **design-reviewer** | Senior product-designer agent. Diagnoses what looks amateurish in a UI and produces a professional, buildable redesign/refactor plan (layout, hierarchy, color, motion, window chrome, branding/mascot) that preserves all functionality, plus an AI-asset spec routed to image-creator. Audits which assets are actually used. | [`agents/design-reviewer/`](agents/design-reviewer/) |
 | **llm-wiki** | Personal knowledge-base librarian (Karpathy "LLM Wiki" pattern). Incrementally builds and maintains a persistent, interlinked markdown wiki from raw sources — ingest, query, lint. | [`agents/llm-wiki/`](agents/llm-wiki/) |
 
 ## How to use an agent

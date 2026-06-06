@@ -35,6 +35,7 @@ import argparse
 import base64
 import json
 import os
+import shutil
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -107,6 +108,45 @@ def estimate_cost(provider: str, model: str, *, kind: str = "image", size: str |
             return round(rate * float(duration or 5), 4)
         return 0.01  # kolors image, sub-cent–cent
     return 0.0
+
+
+def _find_repo_root(p: Path) -> Path | None:
+    """Walk up from p looking for a .git dir (the project's main repo root)."""
+    for d in [p, *p.parents]:
+        if (d / ".git").exists():
+            return d
+    return None
+
+
+def backup_output(out_path) -> Path | None:
+    """Copy a freshly written asset to a backup folder OUTSIDE its main repo.
+
+    Layout (default): <repo_parent>/_asset-backups/<repo_name>/<path-rel-to-repo>
+    Override the backups root with env IMAGEGEN_BACKUP_ROOT.
+    Disable entirely with IMAGEGEN_BACKUP=0.
+    """
+    if os.getenv("IMAGEGEN_BACKUP", "1") in ("0", "false", "no", ""):
+        return None
+    out = Path(out_path).resolve()
+    if not out.exists():
+        return None
+    repo = _find_repo_root(out)
+    env_root = os.getenv("IMAGEGEN_BACKUP_ROOT")
+    if env_root:
+        root = Path(env_root).expanduser().resolve()
+        dest = root / (repo.name / out.relative_to(repo) if repo else Path(out.name))
+    elif repo:
+        # sibling of the repo so backups live OUTSIDE the tracked project
+        dest = repo.parent / "_asset-backups" / repo.name / out.relative_to(repo)
+    else:
+        dest = out.parent / "_asset-backups" / out.name
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(out, dest)
+        return dest
+    except Exception as e:  # backup must never break a generation
+        _eprint(f"  WARN: backup failed: {type(e).__name__}: {e}")
+        return None
 
 
 def log_usage(rec: dict):
@@ -361,6 +401,66 @@ def run_video(args) -> dict:
         raise SystemExit(f"ERROR: video needs Kling — {e}")
 
 
+_REC_KEYS = ("provider", "model", "kind", "detail", "transparent", "cost_usd", "path")
+
+
+def _postprocess(result: dict) -> Path | None:
+    """Log cost, print running spend, and back up the asset. Returns backup path."""
+    log_usage({k: result[k] for k in _REC_KEYS})
+    print_running(result["provider"], result["cost_usd"])
+    bkp = backup_output(result["path"])
+    if bkp:
+        result["backup"] = str(bkp)
+    return bkp
+
+
+def cmd_batch(args):
+    """Generate many assets from a JSON manifest — deterministic, low-token.
+
+    Manifest: a JSON list, or {"assets": [...]} . Each item:
+      {"out": "assets/x.png", "prompt": "...", "transparent": true,
+       "aspect": "1:1", "provider": "auto", "ref": "ref.png",
+       "model": null, "quality": "high", "image_size": "", "label": "x"}
+    Only `out` and `prompt` are required. Relative `out` paths are joined to --base-dir.
+    Generation continues past failures; a summary table prints at the end.
+    """
+    raw = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    items = raw["assets"] if isinstance(raw, dict) else raw
+    base = Path(args.base_dir).resolve() if args.base_dir else None
+    results = []
+    for it in items:
+        out = it["out"]
+        if base and not Path(out).is_absolute():
+            out = str(base / out)
+        label = it.get("label") or Path(out).name
+        transparent = bool(it.get("transparent", False))
+        ns = argparse.Namespace(
+            cmd="generate", prompt=it["prompt"], out=out,
+            transparent=transparent, opaque=not transparent,
+            provider=it.get("provider", "auto"), aspect=it.get("aspect", "1:1"),
+            quality=it.get("quality", "high"), image_size=it.get("image_size", ""),
+            model=it.get("model"), ref=it.get("ref"), json=False,
+        )
+        print(f"### {label}")
+        try:
+            result = run_image(ns)
+            bkp = _postprocess(result)
+            print(f"OK  {result['provider']}:{result['model']}  ->  {result['path']}")
+            if bkp:
+                print(f"    backup -> {bkp}")
+            results.append((label, "ok", result["provider"], result["path"]))
+        except BaseException as e:  # never let one asset abort the batch
+            _eprint(f"FAIL  {label}: {type(e).__name__}: {e}")
+            results.append((label, "FAILED", "-", str(e).replace(chr(10), " ")[:120]))
+    ok = sum(1 for r in results if r[1] == "ok")
+    print(f"\n===== BATCH SUMMARY ({ok}/{len(results)} ok) =====")
+    for label, status, prov, path in results:
+        print(f"  [{status:6s}] {label:26s} {prov:8s} {path}")
+    print()
+    cmd_usage(None)
+    return 0 if ok == len(results) else 1
+
+
 def cmd_usage(_args):
     totals, by_provider, n = _spend_summary()
     print(f"Image-creator spending (estimates) - {n} generations logged")
@@ -409,6 +509,10 @@ def main(argv=None):
     v.add_argument("--model", default=None)
     v.add_argument("--json", action="store_true")
 
+    bt = sub.add_parser("batch", help="generate many assets from a JSON manifest (deterministic, low-token)")
+    bt.add_argument("--manifest", required=True, help="JSON list (or {assets:[...]}) of asset specs")
+    bt.add_argument("--base-dir", default=None, help="prefix joined to relative 'out' paths")
+
     sub.add_parser("usage", help="show estimated spending (today / 7d / all-time)")
 
     args = p.parse_args(argv)
@@ -417,14 +521,17 @@ def main(argv=None):
     if args.cmd == "usage":
         return cmd_usage(args)
 
+    if args.cmd == "batch":
+        return cmd_batch(args)
+
     result = run_image(args) if args.cmd == "generate" else run_video(args)
-    log_usage({k: result[k] for k in ("provider", "model", "kind", "detail",
-                                      "transparent", "cost_usd", "path")})
-    print_running(result["provider"], result["cost_usd"])
+    bkp = _postprocess(result)
     if getattr(args, "json", False):
         print(json.dumps(result))
     else:
         print(f"OK  {result['provider']}:{result['model']}  ->  {result['path']}")
+        if bkp:
+            print(f"    backup -> {bkp}")
 
 
 if __name__ == "__main__":

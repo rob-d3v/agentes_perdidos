@@ -97,7 +97,33 @@ uv run .../imagegen.py video --prompt "drone shot over a canyon at sunset" \
 
 # spending so far (today / last 7 days / all-time, by provider)
 uv run .../imagegen.py usage
+
+# BATCH — generate a whole project from a JSON manifest (deterministic, low-token)
+uv run .../imagegen.py batch --manifest assets.json --base-dir client/
 ```
+
+### Batch mode (prefer this for multi-asset jobs)
+
+Don't hand-write a shell loop of 20 `generate` calls — that burns tokens and drifts.
+Instead write ONE small JSON manifest and let the script do the routing, generation,
+cost logging, **auto-backup**, retries-by-rerun, and a summary table. The model only
+authors the manifest; everything mechanical stays in code.
+
+Manifest = a JSON list (or `{"assets": [...]}`). Per item only `out` + `prompt` are
+required; the rest default (`transparent:false`, `aspect:"1:1"`, `provider:"auto"`,
+`quality:"high"`). Relative `out` paths join `--base-dir`.
+
+```json
+[
+  {"label":"icon","out":"assets/icon.png","prompt":"...","provider":"gemini","aspect":"1:1"},
+  {"label":"logo","out":"assets/logo.png","prompt":"...","transparent":true,"aspect":"3:2","ref":"brand/logo.png"},
+  {"label":"home-hero","out":"assets/images/home-hero.png","prompt":"...","transparent":true,"ref":"brand/mascot.png"}
+]
+```
+
+Generation continues past per-asset failures; the run ends with a
+`BATCH SUMMARY (N/M ok)` table and the usage breakdown. Re-run the same manifest to
+retry only what you trim it down to.
 
 `generate` flags: `--transparent|--opaque` (default opaque) · `--provider auto|openai|gemini|kling`
 (auto = capability chain + fallback) · `--aspect 1:1|16:9|9:16|3:4|4:3|...` · `--quality
@@ -117,16 +143,34 @@ Costs are **estimates** — providers bill by tokens/seconds/credits and prices 
 treat the numbers as a spend gauge, not an invoice. When batch-generating, report the
 running total to the user so they can stop if it climbs.
 
+## Automatic backups (every asset, outside the repo)
+
+After each successful `generate`/`video`, `imagegen.py` copies the written file to a
+backup folder that lives **outside the target project's main repo**, so a stray
+`git clean`, checkout, or sandboxed write can't lose the art. It prints a second line:
+`backup -> <path>`.
+
+- **Default layout:** `<repo_parent>/_asset-backups/<repo_name>/<path-relative-to-repo>`.
+  Example: `hey-ania/assets/images/home-hero.png` →
+  `…/Repositórios/_asset-backups/hey-ania/assets/images/home-hero.png`.
+- The repo root is found by walking up to the nearest `.git`. If the output isn't inside
+  a git repo, backups go to a sibling `_asset-backups/` next to the file.
+- **Override the root:** set `IMAGEGEN_BACKUP_ROOT=/some/dir` (assets land under
+  `<root>/<repo_name>/…`). **Disable:** `IMAGEGEN_BACKUP=0`.
+- Backups never block a generation — a copy failure only prints a `WARN`.
+
 ## Workflow when given a project's prompts.md
 
 1. Read the project's `prompts.md` and any `DESIGN.md` for palette/style. Note the
    "master style suffix" and negative prompt — **append the master style** to each prompt.
-2. Build the full asset list: for each, record `{filename, target path, size/aspect, transparent?}`.
+2. Build the full asset list: for each, apply the **decision matrix** and record
+   `{label, out, prompt (with style appended), aspect, transparent?, provider?, ref?}`.
    Infer the target path from the project layout (e.g. its assets dir) — confirm with the
    user if the destination isn't obvious.
-3. For each asset, apply the **decision matrix**, then run `imagegen.py` writing straight to
-   the project's expected path and extension.
-4. Report a table: asset → provider/model → path → ok/failed. Re-run failures (safety blocks
+3. Write these as ONE JSON manifest and run `imagegen.py batch --manifest … --base-dir <repo>`
+   — it generates, costs, **backs up**, and prints a summary in a single low-token call.
+   (Only drop to per-asset `generate` for a one-off or a targeted re-roll.)
+4. Read the `BATCH SUMMARY` table. Re-run a trimmed manifest for any failures (safety blocks
    or rate limits) with a tweaked prompt or backoff.
 5. Don't burn budget: generate at `--quality high` for finals, but if iterating on a look,
    draft at `low` first.

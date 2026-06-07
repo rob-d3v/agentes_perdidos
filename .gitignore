@@ -3,6 +3,11 @@
 *.env
 !.env.example
 
+# lost-finder hunt output — may hold COPIES OF RECOVERED FILES & WALLET SECRETS. Never commit.
+found/
+agents/*/found/
+**/found/
+
 # Python
 __pycache__/
 *.py[cod]

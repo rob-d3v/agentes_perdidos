@@ -20,6 +20,7 @@ reads its instructions and executes.
 | **design-reviewer** | Senior product-designer agent. Diagnoses what looks amateurish in a UI and produces a professional, buildable redesign/refactor plan (layout, hierarchy, color, motion, window chrome, branding/mascot) that preserves all functionality, plus an AI-asset spec routed to image-creator. Audits which assets are actually used. | [`agents/design-reviewer/`](agents/design-reviewer/) |
 | **lost-finder** | Forensic hunter for lost files. Finds files you can describe but can't locate — even renamed, moved to a backup, or in the Recycle Bin — by matching on **content**: images by color signature ("yellow logo on blue background") with optional Gemini vision-verify, PDFs by extracted-text keywords, both ranked + copied into one folder to eyeball. Plus a **local-only secrets mode** to recover your *own* lost wallet creds: BIP39 checksum-validated seed detection, MetaMask vault-blob extraction, optional local OCR. | [`agents/lost-finder/`](agents/lost-finder/) |
 | **llm-wiki** | Personal knowledge-base librarian (Karpathy "LLM Wiki" pattern). Incrementally builds and maintains a persistent, interlinked markdown wiki from raw sources — ingest, query, lint. | [`agents/llm-wiki/`](agents/llm-wiki/) |
+| **i18n** | Internationalizes any project end-to-end (front + back). Extracts hardcoded strings into translation files with semantic dotted keys, authors **pt-BR + en** by AI (always, source of truth), then auto-generates **~190 more languages** with a free keyless Google-translate script (0 LLM tokens). Wires an in-app language switcher in settings, adapts to the project's native format (i18next JSON / Java `.properties`), and supports cheap incremental re-runs. | [`agents/i18n/`](agents/i18n/) |
 
 ## How to use an agent
 
@@ -42,8 +43,14 @@ agentes_perdidos/
 ├── AGENTS.md             # conventions for adding a new agent
 └── agents/
     ├── image-creator/    # SKILL.md + imagegen.py
+    ├── i18n/            # SKILL.md + translate.py + scan.py + status.py + langs.json
     └── llm-wiki/         # SKILL.md + index.md + log.md + raw/ + wiki/
 ```
+
+> **Lost-agent rule:** an agent runs on *any* project and treats that project as its workspace.
+> It persists project-specific notes/progress in the **target project's own** brain/wiki (an
+> existing `llm-wiki`/`.llm-wiki/`, else a `./.<agent>/` dir there) — not in this repo — and
+> only carries *generalizable* learnings back into its own `SKILL.md`. See [`AGENTS.md`](AGENTS.md).
 
 ## Adding a new agent
 

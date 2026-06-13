@@ -51,7 +51,7 @@ GTX_ALIAS = {
 PLACEHOLDER_RE = re.compile(
     r"\{\{[^}]+\}\}"        # i18next {{var}}
     r"|\{[^{}]*\}"          # ICU / {var} / {0}
-    r"|%\d*\$?[sdfxX@]"     # printf %s %d %1$s %@
+    r"|%(?:\d+\$)?[-+ 0#]*\d*(?:\.\d+)?[sdfxXeEgG@]"  # printf %s %d %1$s %.2f %+.3f %05d %@
     r"|<[^>]+>"             # html / xml tags
     r"|\\n|\\t|\\r"         # escaped whitespace
 )
@@ -184,6 +184,40 @@ def gtx_translate(text, sl, tl, timeout, retries):
     raise RuntimeError(f"gtx failed sl={sl} tl={tl}: {last}")
 
 
+# Batched variant: send many short strings in ONE gtx request, newline-joined.
+# gtx keeps the line breaks as their own segments, so concatenating data[0] and
+# splitting on the separator recovers a 1:1 aligned list. This collapses ~3000
+# requests/lang into ~60, the difference between minutes and hours for ~190 langs.
+# Returns None (caller falls back to per-key) if the split doesn't align, so a
+# bad batch never corrupts output. Only single-line texts are batchable.
+SEP = "\n"
+
+
+def gtx_translate_batch(texts, sl, tl, timeout, retries):
+    masks = [mask(t) for t in texts]
+    joined = SEP.join(m for m, _ in masks)
+    q = urllib.parse.quote(joined)
+    url = f"{GTX}?client=gtx&sl={sl}&tl={tl}&dt=t&q={q}"
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            out = "".join(seg[0] for seg in data[0] if seg and seg[0])
+            parts = out.split(SEP)
+            if len(parts) != len(texts):
+                return None  # misaligned → caller falls back to per-key
+            res = []
+            for part, (_, holes), orig in zip(parts, masks, texts):
+                u = unmask(part, holes)
+                res.append(u if all(h in u for h in holes) else orig)
+            return res
+        except Exception:                            # noqa: BLE001
+            time.sleep(min(8, 0.5 * (2 ** attempt)))
+    return None
+
+
 # ---------- main --------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="Generate non-base locale files via free Google gtx.")
@@ -195,6 +229,7 @@ def main():
     ap.add_argument("--all", action="store_true", help="re-translate even existing target keys")
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--batch", type=int, default=48, help="keys per gtx request (1 = legacy per-key)")
     ap.add_argument("--timeout", type=int, default=15)
     ap.add_argument("--retries", type=int, default=4)
     ap.add_argument("--dry-run", action="store_true")
@@ -259,29 +294,60 @@ def main():
             continue
 
         results = dict(existing)
+        n_err = 0
 
-        def work(k):
+        # Resolve cached + empty keys up front; only the rest hit the network.
+        pending = []  # (k, text, sl)
+        for k in todo:
             text, sl = src_strings[k]
             if not text.strip():
-                return k, text
+                results[k] = text
+                continue
             ck = f"{tl}|{sl}|{text}"
             if ck in cache:
-                return k, cache[ck]
-            tr = gtx_translate(text, sl, tl, a.timeout, a.retries)
-            cache[ck] = tr
-            return k, tr
+                results[k] = cache[ck]
+            else:
+                pending.append((k, text, sl))
 
-        n_err = 0
+        # Batch by source lang; single-line texts go in batches, multiline per-key.
+        batches = []  # list of list[(k,text,sl)]
+        by_sl = {}
+        for item in pending:
+            (by_sl.setdefault(item[2], [])).append(item)
+        for sl, items in by_sl.items():
+            single = [it for it in items if SEP not in it[1]]
+            multi = [it for it in items if SEP in it[1]]
+            bs = max(1, a.batch)
+            for i in range(0, len(single), bs):
+                batches.append(single[i:i + bs])
+            for it in multi:
+                batches.append([it])
+
+        def run_batch(batch):
+            sl = batch[0][2]
+            texts = [t for _, t, _ in batch]
+            out = None
+            if len(batch) > 1:
+                out = gtx_translate_batch(texts, sl, tl, a.timeout, a.retries)
+            if out is None:  # per-key (single item, or batch misaligned/failed)
+                out = []
+                for _, t, _ in batch:
+                    try:
+                        out.append(gtx_translate(t, sl, tl, a.timeout, a.retries))
+                    except Exception:                # noqa: BLE001
+                        out.append(None)
+            return batch, out
+
         with ThreadPoolExecutor(max_workers=a.workers) as ex:
-            futs = {ex.submit(work, k): k for k in todo}
-            for f in as_completed(futs):
-                try:
-                    k, tr = f.result()
-                    results[k] = tr
-                except Exception:                    # noqa: BLE001
-                    n_err += 1
-                    results[futs[f]] = src_strings[futs[f]][0]  # fallback to source
-        total_calls += len(todo)
+            for batch, out in ex.map(run_batch, batches):
+                for (k, text, sl), tr in zip(batch, out):
+                    if tr is None:
+                        n_err += 1
+                        results[k] = text  # fallback to source
+                    else:
+                        results[k] = tr
+                        cache[f"{tl}|{sl}|{text}"] = tr
+        total_calls += len(batches)
 
         ordered = [(k, results[k]) for k in key_order if k in results]
         (dump_json if fmt == "json" else dump_properties)(out_path, ordered)

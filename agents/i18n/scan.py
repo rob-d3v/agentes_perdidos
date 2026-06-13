@@ -40,8 +40,23 @@ SKIP_LINE = re.compile(r"""\b(import|require|export\s+\*|from)\b""")
 SKIP_CALL = re.compile(r"""\b(t|translate|getText|i18n|useTranslation|key|className|"""
                        r"""classList|styles?|testID|console\.\w+|require|import|"""
                        r"""getString|setProperty|getProperty)\s*\(?\s*$""")
+# Already inside a translation call as the DEFAULT-value arg, e.g.
+# `t('home.x', 'Hello')` — the 'Hello' is keyed already, not residual.
+INSIDE_T = re.compile(r"""\b(t|translate|getText|tx)\(\s*(['"]).*?\2\s*,\s*$""")
 URLISH = re.compile(r"""^(https?://|/|\.{0,2}/|@|#[0-9a-fA-F]{3,8}$|data:|mailto:)""")
 LOOKS_CODE = re.compile(r"""^[\w.\-/]+$""")          # identifiers, paths, css tokens
+# JSX/HTML attributes whose value is never user-facing text (unlike placeholder/
+# title/aria-label/alt, which ARE). Matches `className=`, `className={`, etc.
+SKIP_ATTR = re.compile(
+    r"""\b(className|class|style|key|id|type|name|role|htmlFor|to|href|src|rel|"""
+    r"""target|xmlns|viewBox|fill|stroke|transform|points|d|cx|cy|r|x|y|width|"""
+    r"""height|data-[\w-]+)\s*=\s*[{]?\s*$""")
+# A Tailwind/CSS class token: has a hyphen/colon/slash, or is a known utility.
+CSS_TOKEN = re.compile(
+    r"""^(-?[a-z]+[-:/][-a-z0-9.:/\[\]%#()]*|flex|grid|relative|absolute|fixed|"""
+    r"""sticky|block|inline|hidden|container|truncate|uppercase|lowercase|italic|"""
+    r"""underline|rounded|border|shadow|transition|transform|overflow|group|peer|"""
+    r"""static|visible|invisible|isolate)$""")
 HAS_LETTERS = re.compile(r"[A-Za-zÀ-ÿ]")
 HAS_SPACE_OR_CAP_SENTENCE = re.compile(r"[ ]|^[A-ZÀ-Ý].*[a-zà-ÿ]")
 
@@ -69,6 +84,11 @@ def is_candidate(text, min_len):
         return False
     if LOOKS_CODE.match(t):                  # single identifier / path / token
         return False
+    toks = t.split()
+    if len(toks) >= 2:                        # className / style soup, not text
+        cssish = sum(1 for w in toks if CSS_TOKEN.match(w))
+        if cssish / len(toks) >= 0.6:
+            return False
     if t.isupper() and " " not in t:         # ENUM_CONST
         return False
     # require either a space, or a capitalized word (likely a sentence/label)
@@ -95,7 +115,8 @@ def scan(root, exts, ignore, min_len):
                 for m in STRING_RE.finditer(line):
                     text = m.group(2)
                     before = line[:m.start()]
-                    if SKIP_CALL.search(before):
+                    if (SKIP_CALL.search(before) or INSIDE_T.search(before)
+                            or SKIP_ATTR.search(before)):
                         continue
                     if is_candidate(text, min_len):
                         out.append({

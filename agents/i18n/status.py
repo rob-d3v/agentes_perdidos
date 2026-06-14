@@ -87,17 +87,20 @@ def main():
 
     base_keys = set()
     base_present = []
+    empty_base = set()
     for b in bases:
         f = find(src, b, fmt)
         if f:
             base_present.append(b)
-            base_keys |= set(load(f).keys())
+            d = load(f)
+            base_keys |= set(d.keys())
+            empty_base |= {k for k, v in d.items() if not str(v).strip()}
     if not base_keys:
         sys.exit(f"ERROR: no base file {bases} in {src}")
 
     report = {"format": fmt, "basePresent": base_present, "baseKeyCount": len(base_keys),
               "totalLanguages": len(codes), "missingFiles": [], "incomplete": [],
-              "complete": 0, "orphansByLang": {}}
+              "complete": 0, "orphansByLang": {}, "emptyBaseValues": sorted(empty_base)}
 
     for code in codes:
         if code in bases:
@@ -129,6 +132,9 @@ def main():
              + (' ...' if len(report['missingFiles']) > 15 else '')
              if report["missingFiles"] else ""))
     print(f"  incomplete:          {len(report['incomplete'])}")
+    print(f"  empty base values:   {len(report['emptyBaseValues'])}"
+          + (f"  -> {', '.join(report['emptyBaseValues'][:15])}"
+             if report["emptyBaseValues"] else ""))
     if report["incomplete"] and a.verbose:
         for it in report["incomplete"][:30]:
             print(f"     {it['code']:<9} missing {it['missing']}")

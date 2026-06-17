@@ -1,0 +1,105 @@
+{
+  "_about": "Declarative map for navigator's Stripe-dashboard playbooks. URLs are stable; selectors/labels drift, so steps describe WHAT to find by visible label, not brittle CSS indices. The LLM executes these through the backend tier from backend_check.py. Harvested values are written via secrets_writer.py into the TARGET project's .env — never here.",
+  "_modes": ["test", "live"],
+  "_url_note": "Stripe TEST surfaces carry '/test/' in the path; LIVE drops it. Swap accordingly per --mode.",
+  "surfaces": {
+    "create-account": {
+      "tier": 2,
+      "url": "https://dashboard.stripe.com/register",
+      "steps": [
+        "Confirm with operator WHICH account/business this is for before creating.",
+        "Set country + default currency (BRL for these projects unless told otherwise).",
+        "Fill the minimum business profile needed to activate API keys.",
+        "Land on the dashboard home; note the account id (acct_...)."
+      ],
+      "harvest": ["account_id"]
+    },
+    "create-products": {
+      "tier": 2,
+      "url": "https://dashboard.stripe.com/{mode}/products",
+      "steps": [
+        "Add product → name + description.",
+        "Add a price: recurring (monthly/yearly) vs one-off per the project plan; set amount + currency.",
+        "Save; open the product to read its prod_... and each price_... id.",
+        "Repeat per plan (e.g. PRO, STUDIO). Record a code→price_id map."
+      ],
+      "harvest": ["prod_id", "price_id"],
+      "env_keys_hint": ["STRIPE_PRICE_*"]
+    },
+    "restricted-key": {
+      "tier": 2,
+      "url": "https://dashboard.stripe.com/{mode}/apikeys/create",
+      "steps": [
+        "Create restricted key → name it per project (e.g. 'tio-marco-server').",
+        "Set LEAST-PRIVILEGE scopes by VISIBLE ROW LABEL — typically Write on: Checkout Sessions, Customers, Subscriptions, Customer portal, Prices(read), Products(read), Webhook Endpoints(read). Leave everything else None.",
+        "Create the key; it is shown ONCE — reveal and harvest immediately in this same step.",
+        "Verify the granted scopes on the key's detail page before leaving."
+      ],
+      "harvest": ["rk_key"],
+      "env_keys_hint": ["STRIPE_TEST_SECRET_KEY", "STRIPE_LIVE_SECRET_KEY"],
+      "gotcha": "Reveal-once. If the read fails, ROLL/recreate the key — you cannot re-reveal."
+    },
+    "publishable-key": {
+      "tier": 2,
+      "url": "https://dashboard.stripe.com/{mode}/apikeys",
+      "steps": ["Copy the publishable key (pk_...) for the frontend — it is not secret but is per-mode."],
+      "harvest": ["pk_key"],
+      "env_keys_hint": ["STRIPE_TEST_PUBLISHABLE_KEY", "STRIPE_LIVE_PUBLISHABLE_KEY"]
+    },
+    "webhook": {
+      "tier": 2,
+      "url": "https://dashboard.stripe.com/{mode}/webhooks/create",
+      "steps": [
+        "Add endpoint → set the project's URL (e.g. https://api.example.com/api/v1/billing/webhook).",
+        "Select the events the app handles (checkout.session.completed, customer.subscription.created/updated/deleted, invoice.paid, invoice.payment_failed — confirm against the app's handler).",
+        "Create; open the endpoint and reveal the Signing secret (whsec_...) — harvest it."
+      ],
+      "harvest": ["whsec"],
+      "env_keys_hint": ["STRIPE_TEST_WEBHOOK_SECRET", "STRIPE_LIVE_WEBHOOK_SECRET"],
+      "gotcha": "whsec is per-endpoint AND per-mode — test and live endpoints have different secrets."
+    },
+    "customer-portal": {
+      "tier": 2,
+      "url": "https://dashboard.stripe.com/{mode}/settings/billing/portal",
+      "steps": [
+        "Enable the Customer portal.",
+        "Toggle the features the app expects (update payment method, cancel/switch plan, invoice history).",
+        "Save AND activate the live configuration when in live mode (test config does not auto-promote)."
+      ],
+      "harvest": []
+    },
+    "harvest-existing": {
+      "tier": 2,
+      "url": "https://dashboard.stripe.com/{mode}/apikeys",
+      "steps": [
+        "For an already-set-up account (e.g. theniawebapp, maeapp): reveal the secret/restricted key and copy the publishable key.",
+        "Go to Products to read the existing price_... ids; go to Webhooks to read/rotate the whsec_...",
+        "Hand everything to secrets_writer.py for the target project's .env."
+      ],
+      "harvest": ["sk_or_rk_key", "pk_key", "price_id", "whsec"]
+    },
+    "stripe-checkout": {
+      "tier": 2,
+      "url": "https://checkout.stripe.com/...",
+      "steps": [
+        "This is the PENDING-killer the stripe agent can't do on Tier 1.",
+        "Run the test-card matrix: 4242 4242 4242 4242 (success), 4000 0027 6000 3184 / 4000 0025 0000 3155 (3DS — complete the challenge), 4000 0000 0000 9995 (insufficient funds), 4000 0000 0000 0002 (generic decline).",
+        "Use any future expiry, any CVC, any ZIP. Screenshot each end state (success page, 3DS prompt, decline message).",
+        "Hand screenshots to the stripe agent for its Lane-B PDF."
+      ],
+      "harvest": ["screenshots"],
+      "gotcha": "TEST cards only, and only when the session was created with a TEST key. Never type a real card."
+    },
+    "deploy-panel": {
+      "tier": 1,
+      "url": "(project-specific: Coolify / Dokploy panel)",
+      "steps": [
+        "Open the app's Environment / Variables tab.",
+        "Upsert the harvested vars (keys, price ids, urls, MM_STRIPE_* / app.stripe.* per project).",
+        "Trigger a redeploy — Coolify/Dokploy do NOT apply env changes until redeploy.",
+        "After redeploy, hit the app's health endpoint to confirm it picked up the vars."
+      ],
+      "harvest": []
+    }
+  }
+}

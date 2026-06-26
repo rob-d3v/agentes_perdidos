@@ -1,0 +1,22 @@
+{
+  "host_label": "coolify",
+  "backup_dir": "/root/backups",
+  "local_keep": 1,
+  "weekly_weekday": 5,
+  "b2_daily_keep": 3,
+  "b2_weekly_keep": 3,
+  "exclude_patterns": ["^[0-9a-f]{64}$", "redis"],
+  "b2": {
+    "endpoint": "https://s3.us-east-005.backblazeb2.com",
+    "region": "us-east-005",
+    "key_id": "<B2_PRIVATE_KEY_ID>",
+    "application_key": "<B2_PRIVATE_APPLICATION_KEY>",
+    "bucket": "backupPessoalrobsDEV"
+  },
+  "whatsapp": {
+    "api_url": "https://evo.obra.vision",
+    "instance": "diario_obras_instance",
+    "api_key": "<EVOLUTION_KEY>",
+    "target_number": "5562920005056"
+  }
+}

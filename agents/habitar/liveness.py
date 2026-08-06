@@ -577,12 +577,21 @@ def main() -> int:
     base = cfg["app"]["base_url"]
 
     claims_by_surface: dict[str, list] = {}
+    unattributed: list[dict] = []
     promise_data = None
     if args.promises and os.path.exists(args.promises):
         with open(args.promises, encoding="utf-8") as fh:
             promise_data = json.load(fh)
+        # Only findings that name a surface may move that surface's honesty multiplier.
+        # Static code-scan hits (a stray "coming soon" in some other page) have no surface,
+        # and defaulting them to "home" halved the homepage's score for a string it does not
+        # render. They still appear in promises.json; they just do not libel a page.
         for v in promise_data.get("violations", []):
-            claims_by_surface.setdefault(v.get("surface", "home"), []).append(v)
+            surface = v.get("surface")
+            if surface:
+                claims_by_surface.setdefault(surface, []).append(v)
+            else:
+                unattributed.append(v)
     else:
         for c in cfg.get("claims", []):
             if not c.get("substantiated_by"):
@@ -627,6 +636,7 @@ def main() -> int:
             "liveness_at_n0_modelled": round(site_n0, 1),
             "liveness_at_target_modelled": round(site_target, 1),
             "honesty_violations": sum(len(s["honesty_violations"]) for s in surfaces),
+            "unattributed_violations": len(unattributed),
             "leaks_critical": sum(1 for l in source_leaks if l["severity"] == "critical"),
             "leaks_high": sum(1 for l in source_leaks if l["severity"] == "high"),
         },

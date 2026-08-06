@@ -69,6 +69,37 @@ TEXT_EXT = {".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte", ".html", ".htm", ".
             ".yaml", ".json", ".txt", ".env.example"}
 
 
+#: Comment openers per family. A match after one of these on the line is documentation,
+#: not a shipped promise.
+_COMMENT_MARKERS = ("//", "/*", "*", "#", "<!--", "--")
+
+
+def strip_comment(line: str) -> str:
+    """
+    Return the code part of a line, dropping any trailing comment.
+
+    Why this exists: the scanner used to flag its own paper trail. When a placeholder is
+    removed, the responsible thing is to leave a comment saying what it was and why it went
+    ("all four carried dQw4w9WgXcQ into production") — and the next run would report that
+    comment as the very violation it documents. A lint that punishes explaining yourself
+    trains people to delete the explanation.
+
+    Deliberately a heuristic, not a parser: it will also blank a `//` inside a string
+    literal, which costs a false negative on `href="http://..."`-style matches. Missing a
+    real one is recoverable; crying wolf on every documented fix is what gets a lint muted.
+    """
+    stripped = line.lstrip()
+    for marker in _COMMENT_MARKERS:
+        if stripped.startswith(marker):
+            return ""
+    cut = len(line)
+    for marker in ("//", "/*", "<!--"):
+        idx = line.find(marker)
+        if idx != -1:
+            cut = min(cut, idx)
+    return line[:cut]
+
+
 def iter_files(root: str, patterns: list[str]):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in {
@@ -94,8 +125,13 @@ def scan_placeholders(root: str, cfg: dict) -> list[dict]:
                 lines = fh.readlines()
         except OSError:
             continue
-        for n, line in enumerate(lines, 1):
-            if len(line) > 4000:
+        for n, raw in enumerate(lines, 1):
+            if len(raw) > 4000:
+                continue
+            # Only the code half of the line counts. A placeholder named in a comment that
+            # explains its own removal is a paper trail, not a shipped promise.
+            line = strip_comment(raw)
+            if not line.strip():
                 continue
             for token, why in KNOWN_PLACEHOLDERS.items():
                 if token.lower() in line.lower():
@@ -129,10 +165,22 @@ def scan_placeholders(root: str, cfg: dict) -> list[dict]:
     return out
 
 
+#: Terminal states for a claim the site no longer makes. Kept in the config as a record of
+#: what was there and why it went — a resolved claim must stop being reported, or the ledger
+#: never converges and people start deleting history to make the number move.
+RESOLVED = {"removed", "resolved", "retired"}
+
+
+def is_resolved(claim: dict) -> bool:
+    return str(claim.get("substantiated_by") or "").lower() in RESOLVED
+
+
 def collect_outbound_claims(cfg: dict, live_html: str | None) -> list[dict]:
     """Claims of existence: schema.org sameAs plus anything declared in config."""
     claims: list[dict] = []
     for c in cfg.get("claims", []):
+        if is_resolved(c):
+            continue
         if c.get("type") == "outbound":
             claims.append({"id": c.get("id"), "url": c["asserted"], "where": c.get("where", "config"),
                            "surface": c.get("surface", "home")})
@@ -191,7 +239,7 @@ def check_substantiation(cfg: dict, live_html: str | None) -> list[dict]:
     out: list[dict] = []
 
     for c in cfg.get("claims", []):
-        if c.get("type") == "outbound":
+        if c.get("type") == "outbound" or is_resolved(c):
             continue
         src = c.get("substantiated_by")
         if src in (None, "", "null"):
@@ -229,7 +277,11 @@ def check_substantiation(cfg: dict, live_html: str | None) -> list[dict]:
                     continue
                 declared = next((c for c in cfg.get("claims", [])
                                  if c.get("type") == "aggregate_rating"), None)
-                backed = bool(declared and declared.get("substantiated_by"))
+                # A declared-and-resolved claim is not "backed" -- but if the live HTML still
+                # emits the markup after we recorded it as removed, that is a REGRESSION and
+                # must shout, not go quiet.
+                backed = bool(declared and declared.get("substantiated_by")
+                              and not is_resolved(declared))
                 count = ar.get("ratingCount") or ar.get("reviewCount")
                 out.append({
                     "class": "unsubstantiated_claim" if not backed else "ok",

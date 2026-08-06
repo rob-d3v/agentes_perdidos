@@ -4,19 +4,23 @@
 # dependencies = []
 # ///
 """
-merge_keys.py — append agent-extracted i18n keys into the base .properties files.
+merge_keys.py — append agent-extracted i18n keys into the base locale files.
 
 Given one or more keymap JSON files (each a list of {"key","en","ptBR"} or an
-object with a "keymap" list), append every NOT-yet-present key to messages_en
-and messages_pt-BR in the target languages dir. Idempotent: keys already in a
+object with a "keymap" list), append every NOT-yet-present key to the en and
+pt-BR base files in the target languages dir. Idempotent: keys already in a
 base file are left untouched (base languages are sacred / hand-authored).
 
-Real newlines in values are stored as the literal escape \\n (the runtime + the
-gtx masker expect escaped whitespace, and that is how the existing base stores
-multi-line values). Leading whitespace is escaped so .properties keeps it.
+Auto-detects the base format (locked to the project's framework idiom):
+  * properties  → messages_en.properties / messages_pt-BR.properties (Java/Spring,
+    custom React). Keys stored flat. Real newlines → literal \\n; leading space escaped.
+  * json        → en.json / pt-BR.json (i18next). Dotted keymap keys are nested into
+    the existing tree (same flatten/unflatten model translate.py uses), so a key like
+    "settings.payment.pix" becomes {"settings":{"payment":{"pix": ...}}}.
 
 Usage:
   uv run agents/i18n/merge_keys.py --src <languages_dir> --keys a.json b.json ...
+  uv run agents/i18n/merge_keys.py --src <dir> --format json --keys a.json ...
 """
 import argparse, json, os, sys
 
@@ -81,10 +85,73 @@ def append_missing(path, entries, lang):
     return len(rows)
 
 
+# ---------- json base support (i18next nested locales) ------------------------
+def detect_format(src, override):
+    if override and override != "auto":
+        return override
+    has_props = os.path.exists(os.path.join(src, "messages_en.properties")) or \
+        os.path.exists(os.path.join(src, "messages_pt-BR.properties"))
+    has_json = os.path.exists(os.path.join(src, "en.json")) or \
+        os.path.exists(os.path.join(src, "pt-BR.json"))
+    if has_json and not has_props:
+        return "json"
+    return "properties"
+
+
+def _flatten(obj, prefix=""):
+    out = {}
+    for k, v in obj.items():
+        key = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            out.update(_flatten(v, key))
+        else:
+            out[key] = v
+    return out
+
+
+def _unflatten(flat):
+    root = {}
+    for k, v in flat.items():
+        parts = k.split(".")
+        node = root
+        for p in parts[:-1]:
+            nxt = node.get(p)
+            if not isinstance(nxt, dict):
+                if nxt is not None:
+                    raise SystemExit(
+                        f"ERROR: key collision — '{p}' is both a value and a parent "
+                        f"(offending key '{k}'). Rename one of the keys.")
+                nxt = {}
+                node[p] = nxt
+            node = nxt
+        node[parts[-1]] = v
+    return root
+
+
+def append_missing_json(path, entries, lang):
+    base = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            base = json.load(f)
+    flat = _flatten(base)
+    added = 0
+    for (k, en, pt) in entries:
+        if k in flat:
+            continue
+        flat[k] = en if lang == "en" else pt
+        added += 1
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(_unflatten(flat), f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print(f"  {os.path.basename(path)}: +{added} keys")
+    return added
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", required=True, help="languages dir with messages_en/pt-BR")
+    ap.add_argument("--src", required=True, help="languages dir with the en/pt-BR base files")
     ap.add_argument("--keys", nargs="+", required=True, help="keymap JSON files")
+    ap.add_argument("--format", default="auto", choices=["auto", "properties", "json"])
     a = ap.parse_args()
 
     entries = []
@@ -102,10 +169,14 @@ def main():
         uniq.append(e)
     print(f"total distinct keys: {len(uniq)}")
 
-    en = os.path.join(a.src, "messages_en.properties")
-    pt = os.path.join(a.src, "messages_pt-BR.properties")
-    append_missing(en, uniq, "en")
-    append_missing(pt, uniq, "pt-BR")
+    fmt = detect_format(a.src, a.format)
+    print(f"format: {fmt}")
+    if fmt == "json":
+        append_missing_json(os.path.join(a.src, "en.json"), uniq, "en")
+        append_missing_json(os.path.join(a.src, "pt-BR.json"), uniq, "pt-BR")
+    else:
+        append_missing(os.path.join(a.src, "messages_en.properties"), uniq, "en")
+        append_missing(os.path.join(a.src, "messages_pt-BR.properties"), uniq, "pt-BR")
 
 
 if __name__ == "__main__":

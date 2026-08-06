@@ -14,6 +14,8 @@ Usage:
     uv run agents/navigator/playbook_run.py --list
     uv run agents/navigator/playbook_run.py --surface create-products --mode test
     uv run agents/navigator/playbook_run.py --surface restricted-key --mode live --json
+    uv run agents/navigator/playbook_run.py --playbook auth --list
+    uv run agents/navigator/playbook_run.py --playbook auth --surface google-oauth-client --mode prod
 
 Exit 0 = ok. Non-zero = unknown surface / malformed playbook.
 """
@@ -28,40 +30,53 @@ try:
 except Exception:
     pass
 
-PLAYBOOK = Path(__file__).with_name("stripe_playbook.json")
+# Named playbooks live next to this script; --playbook also accepts a path to any .json.
+PLAYBOOKS = {
+    "stripe": Path(__file__).with_name("stripe_playbook.json"),
+    "auth": Path(__file__).with_name("auth_playbook.json"),
+}
 
 
-def load() -> dict:
+def resolve_playbook(name: str) -> Path:
+    if name in PLAYBOOKS:
+        return PLAYBOOKS[name]
+    return Path(name).expanduser()
+
+
+def load(path: Path) -> dict:
     try:
-        return json.loads(PLAYBOOK.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        print(f"ERROR: {PLAYBOOK} not found.")
+        print(f"ERROR: {path} not found.")
         raise SystemExit(2)
     except json.JSONDecodeError as e:
-        print(f"ERROR: {PLAYBOOK} is invalid JSON — {e}")
+        print(f"ERROR: {path} is invalid JSON — {e}")
         raise SystemExit(2)
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Print a Stripe-dashboard playbook checklist.")
+    p = argparse.ArgumentParser(description="Print a navigator dashboard playbook checklist (Stripe or OAuth/CAPTCHA).")
+    p.add_argument("--playbook", default="stripe",
+                   help="which playbook: 'stripe' | 'auth' (or a path to a .json)")
     p.add_argument("--surface", help="surface key (see --list)")
-    p.add_argument("--mode", choices=["test", "live"], default="test")
+    p.add_argument("--mode", choices=["test", "live", "dev", "prod"], default="test",
+                   help="stripe uses test/live; auth uses dev/prod")
     p.add_argument("--list", action="store_true", help="list available surfaces")
     p.add_argument("--json", action="store_true", help="machine-readable")
     args = p.parse_args()
 
-    data = load()
+    data = load(resolve_playbook(args.playbook))
     surfaces = data.get("surfaces", {})
 
     if args.list or not args.surface:
         if args.json:
             print(json.dumps(sorted(surfaces), indent=2))
         else:
-            print("navigator Stripe playbook surfaces:")
+            print(f"navigator '{args.playbook}' playbook surfaces:")
             for k in sorted(surfaces):
                 tier = surfaces[k].get("tier", "?")
-                print(f"  {k:<18} (tier {tier})")
-            print("\nRun: playbook_run.py --surface <key> --mode test|live")
+                print(f"  {k:<22} (tier {tier})")
+            print(f"\nRun: playbook_run.py --playbook {args.playbook} --surface <key> --mode <mode>")
         return 0
 
     if args.surface not in surfaces:
@@ -81,8 +96,8 @@ def main() -> int:
 
     print(f"SURFACE: {args.surface}   MODE: {args.mode}   TIER: {s.get('tier', '?')}")
     print(f"URL:     {url}")
-    if args.mode == "live":
-        print("⚠ LIVE MODE — operator live-promotion gate must be cleared + recorded in project brain.")
+    if args.mode in ("live", "prod"):
+        print("⚠ LIVE/PROD MODE — operator live-promotion gate must be cleared + recorded in project brain.")
     print("STEPS:")
     for i, step in enumerate(s.get("steps", []), 1):
         print(f"  {i}. {step}")

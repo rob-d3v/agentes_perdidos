@@ -1,0 +1,32 @@
+{
+  "_about": "Lane A captcha validation config for captcha_check.py. The harness does TWO things: (A) PROVIDER CONTRACT — drives the provider's siteverify endpoint with its PUBLISHED TEST SECRET KEYS to prove the verify+parse contract (deterministic, no human solving, no app needed); (B) APP GATE (fail-closed) — for each protected endpoint it POSTs with NO captcha token and asserts a 4xx (a request accepted without a token is a CRITICAL open-gate finding). If you run the app with the provider TEST keys and set app_configured_with_test_keys=true + always_pass_token, it also asserts pass-token → 2xx and bad/replayed-token → 4xx. The full positive end-to-end needs the app running with TEST keys. Site key is PUBLIC; the secret key is backend-only and NEVER goes in this file.",
+  "_provider_choices": "recaptcha-v3 | recaptcha-v2 | turnstile. v3 has no public always-pass key, so the provider-contract step exercises the v2 test pair to prove the siteverify contract; the app-gate step is provider-agnostic.",
+
+  "app": "my-app",
+  "provider": "recaptcha-v3",
+  "siteverify_url": "https://www.google.com/recaptcha/api/siteverify",
+  "base_url": "http://localhost:8080",
+
+  "protected_endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "sample_body": {"email": "x@y.z", "password": "correct-horse-battery-staple"},
+      "token_field": "captchaToken",
+      "expect_without_token": [400, 403]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/register",
+      "sample_body": {"email": "new@y.z", "password": "correct-horse-battery-staple"},
+      "token_field": "captchaToken",
+      "expect_without_token": [400, 403],
+      "expect_with_pass_token": [200, 201],
+      "expect_with_bad_token": [400, 403]
+    }
+  ],
+
+  "app_configured_with_test_keys": false,
+  "_always_pass_token_about": "Only used when app_configured_with_test_keys=true. For Turnstile, a dummy token is fine since the TEST secret 1x…AA always passes; for reCAPTCHA v2 use the test response 6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI. NEVER a real secret key.",
+  "always_pass_token": null
+}

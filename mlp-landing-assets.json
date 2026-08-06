@@ -1,0 +1,72 @@
+[
+  {
+    "label": "hero",
+    "out": "hero.jpg",
+    "opaque": true,
+    "aspect": "16:9",
+    "prompt": "Cinematic painterly hero illustration for a literary creation app: a lone dreamer-writer at a rustic wooden desk on a grassy cliff overlooking a vast dreamlike paradise at golden hour; an open book on the desk emits glowing constellations and small floating story-worlds rising from its pages — a tiny castle, a spaceship, fantastical creatures, a film reel; warm cream, teal and gold palette, soft volumetric god-rays, gentle bokeh, premium book-cover concept art, highly detailed, hopeful and magical, absolutely no text or letters or words"
+  },
+  {
+    "label": "aud-writer",
+    "out": "aud-writer.jpg",
+    "opaque": true,
+    "aspect": "3:2",
+    "prompt": "Warm painterly illustration of a focused novelist at a cozy desk, floating manuscript pages lifting into the air and turning into birds of light, soft candle-warm glow, literary and hopeful, cream and teal palette, premium concept art, no text or letters"
+  },
+  {
+    "label": "aud-dreamer",
+    "out": "aud-dreamer.jpg",
+    "opaque": true,
+    "aspect": "3:2",
+    "prompt": "Dreamy surreal illustration of a person lying on a grassy hill gazing up at a golden sky where their imagination forms glowing floating islands, whales swimming through clouds and a faraway shining city, pastel warm palette with teal accents, soft and whimsical, premium concept art, no text or letters"
+  },
+  {
+    "label": "aud-video",
+    "out": "aud-video.jpg",
+    "opaque": true,
+    "aspect": "3:2",
+    "prompt": "Cinematic illustration of an open book unfolding into a glowing movie set, a luminous film reel and stage spotlights rising from the pages, storyboard frames floating outward like leaves, teal and amber palette, magical filmmaking energy, premium concept art, no text or letters"
+  },
+  {
+    "label": "aud-comic",
+    "out": "aud-comic.jpg",
+    "opaque": true,
+    "aspect": "3:2",
+    "prompt": "Vibrant dynamic illustration of a comic artist's desk where inked comic panels leap off the page into an adventurous action scene, energetic motion lines and soft halftone texture, bold yet harmonized with a warm cream and teal palette, premium concept art, no text or letters"
+  },
+  {
+    "label": "feat-brain",
+    "out": "feat-brain.jpg",
+    "opaque": true,
+    "aspect": "3:2",
+    "prompt": "Elegant glowing constellation knowledge graph of story characters, places and ideas connected by delicate threads of light over deep warm parchment, nodes glowing like stars in teal and gold, sophisticated magical data-visualization, premium UI concept art, no text or letters"
+  },
+  {
+    "label": "feat-studio",
+    "out": "feat-studio.jpg",
+    "opaque": true,
+    "aspect": "3:2",
+    "prompt": "A book magically transforming into a cinematic mini-film, its pages becoming glowing movie frames laid along a soft timeline with warm studio lighting and gentle lens flares, teal and amber palette, premium concept art, no text or letters"
+  },
+  {
+    "label": "theme-fantasy",
+    "out": "theme-fantasy.jpg",
+    "opaque": true,
+    "aspect": "3:2",
+    "prompt": "Lush epic fantasy landscape on aged parchment, ancient map aesthetic, rolling golden hills, distant misty mountains and the faint silhouette of a dragon, warm sepia and gold tones, painterly and grand, premium concept art, no text or letters"
+  },
+  {
+    "label": "theme-scifi",
+    "out": "theme-scifi.jpg",
+    "opaque": true,
+    "aspect": "3:2",
+    "prompt": "Sleek neon sci-fi dreamscape, a glowing book opening as a portal into a futuristic cyan and violet cityscape with floating structures and soft holographic light, cinematic and elegant, premium concept art, no text or letters"
+  },
+  {
+    "label": "theme-horror",
+    "out": "theme-horror.jpg",
+    "opaque": true,
+    "aspect": "3:2",
+    "prompt": "Moody atmospheric haunted hotel corridor at night, deep crimson and shadow, a single flickering wall sconce, elegant unsettling cinematic horror mood, painterly, premium concept art, no text or letters"
+  }
+]

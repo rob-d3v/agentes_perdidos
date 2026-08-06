@@ -1,0 +1,75 @@
+{
+  "app": "House Studio (mae-app1)",
+  "_comment": "Lane A validation config for validate.py. Copy per app into the project brain and edit. URLs point at the app running in its homologation/test profile (real TEST keys, mirrored test catalog, `stripe listen` forwarding webhooks). Each check is independent; status is pass|fail|pending.",
+  "checks": [
+    {
+      "name": "card success → PaymentIntent succeeded",
+      "flow": "photo purchase (PaymentIntent)",
+      "type": "stripe_paymentintent",
+      "payment_method": "pm_card_visa",
+      "amount": 4990,
+      "currency": "brl"
+    },
+    {
+      "name": "3DS card → requires_action",
+      "flow": "photo purchase (PaymentIntent)",
+      "type": "stripe_paymentintent",
+      "payment_method": "pm_card_threeDSecure2Required",
+      "amount": 4990,
+      "currency": "brl",
+      "_note": "Completing the 3DS challenge itself is Lane B (browser); here we assert the intent enters requires_action."
+    },
+    {
+      "name": "declined card → requires_payment_method",
+      "flow": "photo purchase (PaymentIntent)",
+      "type": "stripe_paymentintent",
+      "payment_method": "pm_card_chargeDeclined",
+      "amount": 4990,
+      "currency": "brl"
+    },
+    {
+      "name": "insufficient funds → requires_payment_method",
+      "flow": "photo purchase (PaymentIntent)",
+      "type": "stripe_paymentintent",
+      "payment_method": "pm_card_chargeDeclinedInsufficientFunds",
+      "amount": 4990,
+      "currency": "brl"
+    },
+    {
+      "name": "webhook rejects bad signature",
+      "flow": "webhook security",
+      "type": "webhook_signature",
+      "url": "http://localhost:8080/api/webhook/stripe",
+      "expect_status_any": [400, 401, 403]
+    },
+    {
+      "name": "duplicate create is idempotent",
+      "flow": "webhook security",
+      "type": "stripe_idempotency",
+      "idempotency_key": "validate-housestudio-001"
+    },
+    {
+      "name": "app reports purchase SUCCEEDED after webhook",
+      "flow": "photo purchase (end-to-end)",
+      "type": "http",
+      "method": "GET",
+      "url": "http://localhost:8080/api/purchases/by-payment-intent/pi_REPLACE_ME",
+      "headers": { "Authorization": "Bearer REPLACE_TEST_JWT" },
+      "poll": { "attempts": 15, "interval_seconds": 2 },
+      "expect_status": 200,
+      "expect_field": { "path": "status", "in": ["SUCCEEDED", "COMPLETED", "PAID"] },
+      "_note": "Trigger the real flow first (Lane B checkout OR `stripe trigger payment_intent.succeeded`), then this poll asserts the app persisted the end-state. Replace the pi id + token after creating the intent."
+    },
+    {
+      "name": "subscription active after checkout.session.completed",
+      "flow": "subscription",
+      "type": "http",
+      "method": "GET",
+      "url": "http://localhost:8080/api/subscriptions/status",
+      "headers": { "Authorization": "Bearer REPLACE_TEST_JWT" },
+      "poll": { "attempts": 15, "interval_seconds": 2 },
+      "expect_field": { "path": "status", "in": ["active", "trialing"] },
+      "_note": "Drive the Checkout Session in the browser (Lane B) or `stripe trigger checkout.session.completed`, then assert the app activated it. Renewals/trials → use a Stripe Test Clock (see SKILL.md)."
+    }
+  ]
+}

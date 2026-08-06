@@ -197,6 +197,19 @@ def print_running(provider: str, cost: float):
 
 
 # ---------------------------------------------------------------------------
+# Reference images (edit / multi-image fusion)
+# ---------------------------------------------------------------------------
+def _norm_refs(ref) -> list:
+    """Accept None | str | Path | list-of-those -> list[Path]. Enables multi-image
+    fusion (e.g. pass a pose image + a face image to swap one onto the other)."""
+    if not ref:
+        return []
+    if isinstance(ref, (str, Path)):
+        return [Path(ref)]
+    return [Path(r) for r in ref]
+
+
+# ---------------------------------------------------------------------------
 # OpenAI route (transparency-capable)
 # ---------------------------------------------------------------------------
 def gen_openai(prompt, out: Path, *, transparent, aspect, quality, model, ref) -> dict:
@@ -215,9 +228,14 @@ def gen_openai(prompt, out: Path, *, transparent, aspect, quality, model, ref) -
     kwargs = dict(model=model, prompt=prompt, size=size, quality=quality, output_format=out_format, n=1)
     if transparent:
         kwargs["background"] = "transparent"
-    if ref:
-        with open(ref, "rb") as fh:
-            resp = client.images.edit(image=fh, **kwargs)
+    refs = _norm_refs(ref)
+    if refs:
+        files = [open(r, "rb") for r in refs]
+        try:
+            resp = client.images.edit(image=(files if len(files) > 1 else files[0]), **kwargs)
+        finally:
+            for fh in files:
+                fh.close()
     else:
         resp = client.images.generate(**kwargs)
 
@@ -249,8 +267,8 @@ def gen_gemini(prompt, out: Path, *, transparent, aspect, image_size, model, ref
     config = types.GenerateContentConfig(response_modalities=["IMAGE"],
                                          image_config=types.ImageConfig(**img_cfg))
     contents: list = [prompt]
-    if ref:
-        contents.append(Image.open(ref))
+    for r in _norm_refs(ref):
+        contents.append(Image.open(r))
     resp = client.models.generate_content(model=model, contents=contents, config=config)
 
     for part in resp.candidates[0].content.parts:
@@ -314,8 +332,9 @@ def gen_kling_image(prompt, out: Path, *, transparent, aspect, model, ref) -> di
     from PIL import Image
     model = model or KLING_IMAGE_MODEL
     body = {"model_name": model, "prompt": prompt, "aspect_ratio": aspect, "n": 1}
-    if ref:
-        body["image"] = _img_to_b64(ref)
+    refs = _norm_refs(ref)
+    if refs:
+        body["image"] = _img_to_b64(refs[0])  # Kling takes a single reference image
     url = _kling_submit_poll("/v1/images/generations", body, "images")
     raw = requests.get(url, timeout=120).content
     img = Image.open(BytesIO(raw))
@@ -359,9 +378,10 @@ def build_chain(provider: str, transparent: bool) -> list[str]:
 def run_image(args) -> dict:
     transparent = args.transparent
     out = Path(args.out)
-    ref = Path(args.ref) if args.ref else None
-    if ref and not ref.exists():
-        raise SystemExit(f"ERROR: --ref not found: {ref}")
+    ref = _norm_refs(args.ref)
+    for r in ref:
+        if not r.exists():
+            raise SystemExit(f"ERROR: --ref not found: {r}")
     chain = build_chain(args.provider, transparent)
     dispatch = {
         "openai": lambda: gen_openai(args.prompt, out, transparent=transparent, aspect=args.aspect,
@@ -496,7 +516,9 @@ def main(argv=None):
     g.add_argument("--image-size", default="", choices=["", "1K", "2K", "4K"],
                    help="Gemini route only (2K/4K need a gemini-3 image model)")
     g.add_argument("--model", default=None)
-    g.add_argument("--ref", default=None, help="source image for edit mode")
+    g.add_argument("--ref", action="append", default=None,
+                   help="source image for edit mode; repeatable for multi-image fusion, "
+                        "e.g. --ref pose.png --ref face.jpg (face-swap: keep pose, swap face)")
     g.add_argument("--json", action="store_true")
 
     v = sub.add_parser("video", help="generate a video via Kling (text2video or image2video)")

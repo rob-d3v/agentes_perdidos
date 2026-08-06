@@ -1,0 +1,61 @@
+{
+  "_about": "Declarative map for navigator's APP-LEVEL E2E flows against the locally-running House Studio app (mae-app1): frontend dev :3001, backend :3000. Same schema as stripe_playbook.json (surfaces.{name}.{tier,url,steps[],harvest[],gotcha}). URLs are local + stable; selectors drift, so steps describe WHAT to find by visible/accessible label or data-testid, NOT brittle CSS indices. Executed through Tier 2 (chrome-devtools-mcp Puppeteer). Here 'harvest' means E2E artifacts/assertions (a downloaded file, a rendered KPI/chart) — NOTHING is written to .env. This validates the Reports hub + Admin console features.",
+  "_modes": ["local"],
+  "_prereqs": [
+    "Backend running on :3000 (VITE_API_URL=http://localhost:3000/api).",
+    "Frontend dev server on :3001 (cd frontend && npm run dev).",
+    "Seeded PHOTOGRAPHER account WITH report data (>=1 gallery with views via photo_access_logs, >=1 lead, >=1 ai_usage_log row, >=1 COMPLETED photo_purchase) so reports are NOT empty.",
+    "Seeded ADMIN account (users.role='ADMIN') so /admin metrics resolve and the Admin nav item renders.",
+    "A known browser download directory so the runner can stat the exported PDF/CSV files.",
+    "data-testid hooks added by the frontend build: period-7/period-30/period-90/period-365 (PeriodSelector), report-tab-{overview,engagement,sales,leads,ai-usage,subscription} (ReportTabs), export-pdf / export-csv (ExportButtons), admin-tab-{overview,users,finance,ai-costs,system} (AdminTabs)."
+  ],
+  "_testids": {
+    "period_buttons": ["period-7", "period-30", "period-90", "period-365", "period-custom"],
+    "report_tabs": ["report-tab-overview", "report-tab-engagement", "report-tab-sales", "report-tab-leads", "report-tab-ai-usage", "report-tab-subscription"],
+    "export_buttons": ["export-pdf", "export-csv"],
+    "admin_tabs": ["admin-tab-overview", "admin-tab-users", "admin-tab-finance", "admin-tab-ai-costs", "admin-tab-system"]
+  },
+  "surfaces": {
+    "reports-export": {
+      "tier": 2,
+      "url": "http://localhost:3001/login",
+      "steps": [
+        "Navigate to /login. Fill the email + password of the SEEDED PHOTOGRAPHER, submit, and wait until the authenticated shell (House Studio logo / dashboard greeting) is visible — confirms auth + token persisted to localStorage.",
+        "Navigate to /reports. Wait for the Reports hub: the brand ReportHeader (company name / avatar) AND the period selector (data-testid period-30) must render.",
+        "Click the 30-day period button (data-testid period-30). Confirm it switches to the active btn-primary styling.",
+        "Open the Sales report — click data-testid report-tab-sales. Wait for its KPI cards (KpiCardRow) AND at least one recharts chart (an svg.recharts-surface) to appear; assert the data table has >= 1 row (reports are seeded non-empty).",
+        "Click Export PDF (data-testid export-pdf). Assert the network call GET /api/reports/sales/export?format=pdf returns 200 with content-type application/pdf, and a file landed in the download dir with non-zero size (first bytes %PDF).",
+        "Click Export CSV (data-testid export-csv). Assert GET /api/reports/sales/export?format=csv returns 200 text/csv and a CSV file downloaded with a header row.",
+        "Spot-check 2 more tabs (report-tab-engagement, report-tab-ai-usage): each renders KPIs + a chart without console errors."
+      ],
+      "harvest": ["downloaded_pdf_path", "downloaded_csv_path", "report_kpi_values", "screenshot"],
+      "gotcha": "Reports must be seeded with data or the table assertion (>=1 row) fails even though Export still works. The PDF is SERVER-rendered + branded — the frontend only triggers the blob download, so a failure on export is usually the backend /export endpoint, not the UI. The user can only ever see their OWN data (no userId param) — do not expect another photographer's rows."
+    },
+    "admin-metrics": {
+      "tier": 2,
+      "url": "http://localhost:3001/login",
+      "steps": [
+        "Navigate to /login. Log in as the SEEDED ADMIN; wait for the dashboard. Confirm the 'Admin' nav item is present (only rendered when user.role==='ADMIN').",
+        "Navigate to /admin. Wait for the admin shell (Shield header + AdminTabs bar).",
+        "Ensure the Overview tab is active (data-testid admin-tab-overview). Assert the platform KPI cards render with NUMERIC values (signups / active subs / MRR / AI spend) AND at least two recharts charts (svg.recharts-surface count >= 2: signups time-series + active-subs-by-plan).",
+        "Switch to AI Costs (data-testid admin-tab-ai-costs); assert the spend-by-provider chart and the top-spenders table render (margin watch).",
+        "Switch to System (data-testid admin-tab-system); assert the expiring-subscriptions / webhook-events / suppressions tables render (may be empty — assert the section frame, not row count).",
+        "Back to Overview; click Export PDF (data-testid export-pdf). Assert GET /api/admin/metrics/overview/export?format=pdf returns 200 application/pdf and an admin-*.pdf downloaded (non-zero)."
+      ],
+      "harvest": ["admin_overview_kpis", "downloaded_admin_pdf_path", "screenshot"],
+      "gotcha": "AdminRoute redirects non-admins to '/', so logging in with a PHOTOGRAPHER account makes /admin silently bounce to the dashboard — a snapshot would show the dashboard, not the Shield header. Verify the seeded account's role is ADMIN first. Admin metrics are Caffeine-cached for ~5 min server-side, so values may not reflect a just-created row immediately."
+    },
+    "reports-access-control": {
+      "tier": 2,
+      "url": "http://localhost:3001/login",
+      "steps": [
+        "Negative test. Log in as the SEEDED PHOTOGRAPHER (non-admin).",
+        "Navigate to /admin directly. Assert AdminRoute bounces to '/' (dashboard), NOT the admin Shield header — proves role gating on the client.",
+        "In the browser console (evaluate_script), fetch('/api/admin/metrics/overview', { headers:{Authorization:'Bearer '+localStorage.getItem('token')} }) and assert HTTP 403 — proves server-side ADMIN gating.",
+        "Optionally fetch('/api/reports/sales?from=...&to=...') and assert it returns ONLY this user's data (200, scoped)."
+      ],
+      "harvest": ["admin_redirect_confirmed", "api_403_confirmed"],
+      "gotcha": "This surface intentionally expects FAILURE/denial responses. A 200 from /api/admin/metrics/overview for a photographer is a SECURITY BUG to report immediately."
+    }
+  }
+}

@@ -33,3 +33,19 @@ agents/*/.usage/
 # LLM Wiki raw assets that are large (keep markdown, ignore heavy binaries if desired)
 # (commented out by default — uncomment if raw/ gets heavy)
 # llm-wiki/raw/assets/
+
+# ---------------------------------------------------------------------------
+# PRIVATE — this repo is PUBLIC. These are operator/fleet artifacts: real host
+# names, panel URLs, PaaS UUIDs, per-app runbooks, unreviewed media. They belong
+# in the private agent repo or nowhere, never here. Listed so they can't be
+# swept in by a `git add -A`.
+# ---------------------------------------------------------------------------
+MANUAL-ACTIONS-*.md
+STRIPE-HOMOLOGACAO-*.md
+GUIA-*.pdf
+*.mp3
+new/
+.claude/
+
+# Agent working dirs in target projects (never inside this repo, but be explicit)
+.habitar/

@@ -14,10 +14,13 @@ Guarantees (all enforced here, not just documented):
   1. REFUSES if --target-env resolves inside the agentes_perdidos repo (no secret lands here).
   2. VERIFIES the target dir's .gitignore actually ignores the env file before writing
      (use --add-gitignore to append the rule; otherwise it refuses).
-  3. CLASSIFIES each value's Stripe prefix (sk_/rk_/pk_ + _test_/_live_) and stamps mode.
-  4. LIVE keys require --allow-live (the operator live-promotion gate). Default path is test-only.
-  5. Idempotent UPSERT — updates a key in place, never duplicates, preserves other lines/comments.
-  6. NEVER prints a full secret — name + last-4 only.
+  3. CLASSIFIES each value — Stripe prefixes (sk_/rk_/pk_ + _test_/_live_) AND OAuth/CAPTCHA
+     credentials (Google/Facebook/X client ids+secrets, reCAPTCHA/Turnstile site+secret keys).
+  4. LIVE Stripe keys require --allow-live (the operator live-promotion gate).
+  5. REFUSES a SECRET value written into a frontend-PUBLIC var (VITE_/REACT_APP_/EXPO_PUBLIC_/
+     NEXT_PUBLIC_/PUBLIC_ prefix) — that would ship a secret in the browser/mobile bundle. (GUARD-5)
+  6. Idempotent UPSERT — updates a key in place, never duplicates, preserves other lines/comments.
+  7. NEVER prints a full secret — name + last-4 only.
 
 Usage (value via stdin keeps it out of shell history — preferred for secrets):
     printf 'sk_test_51ABC...' | uv run agents/navigator/secrets_writer.py \
@@ -52,8 +55,14 @@ except Exception:
 PERDIDOS_MARKERS = ("AGENTS.md", "agents")
 
 
+# Frontend-public env var prefixes — a SECRET written into one of these would ship in the
+# browser/mobile bundle. GUARD-5 refuses that.
+FRONTEND_PUBLIC_PREFIXES = ("VITE_", "REACT_APP_", "EXPO_PUBLIC_", "NEXT_PUBLIC_", "PUBLIC_")
+
+
 def classify(value: str) -> tuple[str, bool]:
-    """(label, is_live) for Stripe keys; ('opaque value', False) for anything else (IDs, urls)."""
+    """(label, is_live) for known credentials by VALUE pattern; ('opaque value', False) otherwise.
+    is_live is True only for Stripe *_live_ keys (the only thing behind the --allow-live gate)."""
     v = value.strip()
     table = {
         "sk_live_": ("live secret key", True), "rk_live_": ("live restricted key", True),
@@ -61,11 +70,44 @@ def classify(value: str) -> tuple[str, bool]:
         "rk_test_": ("test restricted key", False), "pk_test_": ("test publishable key", False),
         "whsec_": ("webhook signing secret", False), "price_": ("price id", False),
         "prod_": ("product id", False),
+        # OAuth (social-auth agent)
+        "GOCSPX-": ("google oauth client secret", False),
     }
     for prefix, (label, live) in table.items():
         if v.startswith(prefix):
             return (label, live)
+    if v.endswith(".apps.googleusercontent.com"):
+        return ("google oauth client id (public)", False)
     return ("opaque value", False)
+
+
+# Env-key-name hints (used together with the value to judge sensitivity for GUARD-5).
+_SECRET_NAME_HINTS = ("CLIENT_SECRET", "APP_SECRET", "CONSUMER_SECRET", "API_SECRET",
+                      "SECRET_KEY", "PRIVATE_KEY", "ACCESS_KEY", "BEARER_TOKEN")
+_PUBLIC_NAME_HINTS = ("CLIENT_ID", "APP_ID", "SITE_KEY", "PUBLISHABLE", "PUBLIC")
+
+
+def looks_secret(key: str, value: str) -> bool:
+    """True if (key, value) is a backend-only secret. Conservative: known-public wins over generic
+    'SECRET' substring so a SITE_KEY/CLIENT_ID is never misflagged."""
+    k = key.upper()
+    v = value.strip()
+    label, _ = classify(v)
+    # Hard public signals first.
+    if v.startswith("pk_") or label.endswith("(public)") or v.endswith(".apps.googleusercontent.com"):
+        return False
+    if any(h in k for h in _PUBLIC_NAME_HINTS) and not any(h in k for h in _SECRET_NAME_HINTS):
+        return False
+    # Hard secret signals (value).
+    if v.startswith(("sk_", "rk_", "GOCSPX-", "whsec_")):
+        return True
+    # Secret signals (name).
+    if any(h in k for h in _SECRET_NAME_HINTS):
+        return True
+    # Facebook app secret heuristic: 32 lowercase-hex chars with a facebook/app-secret-ish name.
+    if len(v) == 32 and all(c in "0123456789abcdef" for c in v) and ("FACEBOOK" in k or "FB_" in k or "APP_SECRET" in k):
+        return True
+    return False
 
 
 def mask(value: str) -> str:
@@ -196,6 +238,16 @@ def main() -> int:
         print("        Live writes require the operator live-promotion gate. Re-run with --allow-live")
         print("        only after authorization is recorded in the project brain.")
         return 3
+
+    # GUARD 5 — never write a SECRET into a frontend-public var (it would ship in the bundle).
+    leaks = [k for k, v in pairs.items()
+             if k.upper().startswith(FRONTEND_PUBLIC_PREFIXES) and looks_secret(k, v)]
+    if leaks:
+        print(f"REFUSE: secret value(s) assigned to frontend-PUBLIC var(s): {', '.join(leaks)}")
+        print("        VITE_/REACT_APP_/EXPO_PUBLIC_/NEXT_PUBLIC_/PUBLIC_ vars ship to the browser/")
+        print("        mobile bundle. Put the secret in a backend-only var (e.g. GOOGLE_CLIENT_SECRET)")
+        print("        and keep only public values (client id, site key, pk_) in the frontend var.")
+        return 5
 
     # GUARD 2 — env file must be gitignored.
     ok, why = gitignored(target, args.add_gitignore)

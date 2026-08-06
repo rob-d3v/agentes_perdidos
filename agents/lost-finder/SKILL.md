@@ -33,7 +33,16 @@ PEP-723; no venv). No API keys required for the core hunt.
 | **Filename keywords** | both | substring hits in the filename nudge the rank up but never decide alone (the file may be renamed to garbage). |
 | **Vision verify** (optional) | top images | sends the top-N color matches to Gemini vision with a yes/no prompt ("is this *the* set-square logo, not a meme/avatar/photo?"). Kills the color stage's false positives. Needs `GEMINI_API_KEY` in repo `.env`. |
 
-A **preset** bundles the color set + keyword sets for one hunt. The built-in `esquadro`
+A **preset** bundles the color set + keyword sets for one hunt. Two ship built-in:
+
+- **`escritores`** — text-only target for the **"Escritor Fantástico" writing course** (Prof.
+  Saymon César; user once called it "Marina Blanc") and any loose creative-writing / literatura
+  fantástica docs. No color signature; matched purely by pt-BR keywords across **PDFs AND slide
+  decks** (pptx/odp/key) AND writing docs (docx/txt/md/epub) via the new `docs` command. Use this
+  to hunt course slides/apostilas, the D.E.H. "Dossiê do Escritor Híbrido" workbook, novel drafts, etc.
+- **`esquadro`** — image+pdf target (below).
+
+The `esquadro`
 preset targets: a **yellow set-square (esquadro) logo on a blue background** PNG/JPG, plus a
 **civil-engineering "obras" PDF** (keywords: esquadro, engenharia, obra, civil, projeto,
 planta, orçamento, construção, reforma, CREA, m², …). Edit `PRESETS` in the script to add
@@ -49,10 +58,16 @@ uv run agents/lost-finder/lostfinder.py hunt --preset esquadro --quick --copy-to
 # Full sweep of whole drives (slower; includes Recycle Bin). E is the user's backup drive.
 uv run agents/lost-finder/lostfinder.py hunt --preset esquadro --drives C D E --copy-top 20
 
+# Hunt the writing course (text-only preset): scores pdfs + slides (pptx/odp) + docs by pt-BR keywords.
+uv run agents/lost-finder/lostfinder.py hunt --preset escritores --drives C D E --copy-top 25
+# Just the slide-deck / writing-doc stage from an existing index:
+uv run agents/lost-finder/lostfinder.py docs --preset escritores --index found/index.json --copy-top 25
+
 # Or run the stages separately (re-use one index for many scoring passes):
 uv run agents/lost-finder/lostfinder.py scan   --drives C D E --index found/index.json
 uv run agents/lost-finder/lostfinder.py images --index found/index.json --copy-top 20 --csv found/imgs.csv
 uv run agents/lost-finder/lostfinder.py pdfs   --index found/index.json --copy-top 20 --csv found/pdfs.csv
+uv run agents/lost-finder/lostfinder.py docs   --index found/index.json --copy-top 20 --csv found/docs.csv
 
 # Tweak the color target without touching code:
 uv run agents/lost-finder/lostfinder.py images --colors yellow,blue --index found/index.json

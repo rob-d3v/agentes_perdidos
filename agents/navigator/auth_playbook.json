@@ -1,0 +1,92 @@
+{
+  "_about": "Declarative map for navigator's OAuth + CAPTCHA console playbooks (pairs with the social-auth and captcha agents). URLs are stable; console UIs drift, so steps describe WHAT to find by visible label, not brittle selectors. The LLM executes these through the backend tier from backend_check.py (these are non-financial dashboards → Tier 1 Claude-in-Chrome usually works; escalate per the matrix if challenged). Harvested values are written via secrets_writer.py into the TARGET project's .env — never here. Client IDs / site keys are PUBLIC (frontend ok); client/app/secret keys are BACKEND-ONLY (secrets_writer GUARD-5 refuses a secret in a VITE_/REACT_APP_/EXPO_PUBLIC_/NEXT_PUBLIC_ var).",
+  "_modes": ["dev", "prod"],
+  "_inputs_from_social_auth": "social-auth tells you per surface: application type (Web/Android/iOS/Desktop), exact redirect URIs + JS origins (dev+prod), and the env var names to write each credential into. captcha tells you: provider, the domains to allow (host only), and the site/secret env var names.",
+  "surfaces": {
+    "google-consent": {
+      "tier": 1,
+      "url": "https://console.cloud.google.com/auth/overview",
+      "steps": [
+        "Confirm with operator WHICH Google account + which Cloud project (one project per business; the Ania apps share one). Use the top-bar project picker or create a project.",
+        "Menu → 'Google Auth Platform' (formerly 'APIs & Services → OAuth consent screen'). If unconfigured, click 'Get started'.",
+        "BRANDING: App name + user support email → Next.",
+        "AUDIENCE: 'External' (any Google account) unless a Workspace-internal app → Next.",
+        "CONTACT: developer email → Finish → agree to the User Data Policy → Create.",
+        "DATA ACCESS → 'Add or remove scopes' → select non-sensitive: openid, .../auth/userinfo.email, .../auth/userinfo.profile → Update → Save. (These three trigger NO security assessment.)",
+        "AUDIENCE tab: status starts 'Testing' (cap 100 testers, refresh tokens expire 7 days). Add the operator + test accounts under 'Test users'. To go live for real users click 'Publish app' → 'In production' (MANUAL gate — see MANUAL-ACTIONS)."
+      ],
+      "harvest": [],
+      "gotcha": "Console moved in 2024-2025: 'OAuth consent screen' is now 'Google Auth Platform' with Branding/Audience/Clients/Data Access tabs. Old guides are stale."
+    },
+    "google-oauth-client": {
+      "tier": 1,
+      "url": "https://console.cloud.google.com/auth/clients",
+      "steps": [
+        "Google Auth Platform → CLIENTS → 'Create client'.",
+        "Application type: 'Web application' for React-Vite/Next/Spring backends; 'Android' / 'iOS' for RN-Expo native (RN needs ALL THREE: Web + Android + iOS); 'Desktop app' for JavaFX/CLI loopback. Name it per project.",
+        "(Web) Authorized JavaScript origins = the SPA origins social-auth gave you (e.g. https://app.example.com, http://localhost:5173). Authorized redirect URIs = the EXACT backend callbacks (e.g. https://api.example.com/api/auth/google/callback, http://localhost:8080/api/auth/google/callback; Spring-Security default is /login/oauth2/code/google). EXACT match, no wildcards, no trailing-slash drift.",
+        "(Android) Package name + SHA-1 of EACH signing key (debug + Play App Signing). (iOS) Bundle ID. Native clients get NO secret.",
+        "Create → the modal shows Client ID and (web/desktop only) Client secret → click 'Download JSON' NOW (secret shown in full once; afterwards only last-4).",
+        "Harvest: Client ID is PUBLIC; Client secret is SECRET (web/desktop only)."
+      ],
+      "harvest": ["google_client_id", "google_client_secret"],
+      "env_keys_hint": ["GOOGLE_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_OAUTH_CLIENT_SECRET", "VITE_GOOGLE_CLIENT_ID", "REACT_APP_GOOGLE_CLIENT_ID", "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"],
+      "gotcha": "Client ID may go in a frontend (public) var; the SECRET must go ONLY in a backend var — secrets_writer GUARD-5 refuses a secret in a VITE_/REACT_APP_/EXPO_PUBLIC_ key."
+    },
+    "facebook-app": {
+      "tier": 1,
+      "url": "https://developers.facebook.com/apps/",
+      "steps": [
+        "developers.facebook.com → complete developer registration if first time. 'My Apps' → 'Create App'.",
+        "App details: name + contact email → Next. Use cases: select 'Authenticate and request data from users with Facebook Login' (provisions Facebook Login + email/public_profile) → Next.",
+        "Business portfolio: connect one or skip → Create app → Go to dashboard.",
+        "App settings → Basic: copy the App ID; click 'Show' on 'App secret' (re-auth) to reveal/copy; copy the Client token. Add Privacy Policy URL + App Domains (MANUAL prerequisite for Live).",
+        "Facebook Login → Settings: Client OAuth Login ON, Web OAuth Login ON, Strict Mode ON. 'Valid OAuth Redirect URIs' = the EXACT callbacks social-auth gave you (dev + prod). Save.",
+        "(iOS/Android) App settings → Basic → Add Platform → enter Bundle ID / Package name + key hashes.",
+        "Switch app Development → Live (top toggle) when ready for non-role users (MANUAL gate). In Development only Roles-listed testers can log in (any permission, no review)."
+      ],
+      "harvest": ["facebook_app_id", "facebook_app_secret", "facebook_client_token"],
+      "env_keys_hint": ["FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET", "FACEBOOK_CLIENT_TOKEN", "VITE_FACEBOOK_APP_ID", "EXPO_PUBLIC_FACEBOOK_APP_ID"],
+      "gotcha": "App ID is public; App secret is BACKEND-ONLY. email+public_profile need no App Review. Strict-Mode redirect URIs are exact-match (the #1 'URL blocked' cause). Email can be null even when granted."
+    },
+    "recaptcha-key": {
+      "tier": 1,
+      "url": "https://www.google.com/recaptcha/admin/create",
+      "steps": [
+        "Sign in with the operator's Google account. Label = a human name (e.g. 'myapp-login-prod').",
+        "reCAPTCHA type: 'Score based (v3)' for invisible login/register scoring; create a SEPARATE 'Challenge (v2)' → \"'I'm not a robot' Checkbox\" key for the low-score fallback (v2 and v3 keys are NOT interchangeable).",
+        "Domains: add each host the captcha agent gave you (host only — NO scheme/port/path; apex covers subdomains). Add 'localhost' only to a DEV key, never the prod key.",
+        "Accept the Terms → Submit.",
+        "Harvest: Site Key (PUBLIC) + Secret Key (SECRET). Optionally toggle 'Verify the origin of reCAPTCHA solutions' — if off, the app must assert the siteverify 'hostname' itself."
+      ],
+      "harvest": ["recaptcha_site_key", "recaptcha_secret_key"],
+      "env_keys_hint": ["RECAPTCHA_SITE_KEY", "RECAPTCHA_SECRET_KEY", "VITE_RECAPTCHA_SITE_KEY", "REACT_APP_RECAPTCHA_SITE_KEY", "RECAPTCHA_V2_SITE_KEY", "RECAPTCHA_V2_SECRET_KEY"],
+      "gotcha": "Both site and secret keys start '6L' — distinguish by which field the console labels them, NOT by prefix. Domain edits take ~30 min to propagate. localhost not allowed by default."
+    },
+    "turnstile-widget": {
+      "tier": 1,
+      "url": "https://dash.cloudflare.com/?to=/:account/turnstile",
+      "steps": [
+        "ALTERNATIVE to reCAPTCHA (not used in the current rollout). dash.cloudflare.com → Turnstile → 'Add widget'.",
+        "Widget name; Hostname management = each bare FQDN (no scheme/port/path/wildcard; added host covers its subdomains). Widget Mode = Managed (recommended). Optionally enable Pre-clearance for SPA logins.",
+        "Create → copy Sitekey (PUBLIC) + Secret key (SECRET).",
+        "FASTER ALT: skip the dashboard — use the official Cloudflare API MCP (github.com/cloudflare/mcp) or POST /accounts/{id}/challenges/widgets with a scoped API token to create the widget programmatically, then harvest."
+      ],
+      "harvest": ["turnstile_site_key", "turnstile_secret_key"],
+      "env_keys_hint": ["TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY", "VITE_TURNSTILE_SITE_KEY"],
+      "gotcha": "Turnstile token TTL 300s, single-use. Cloudflare MCP can do widget CRUD without clicking."
+    },
+    "deploy-panel-auth": {
+      "tier": 1,
+      "url": "(project-specific: Coolify https://<your-coolify-host> or Dokploy https://<your-dokploy-host>)",
+      "steps": [
+        "Prefer the API CLIs over clicking: Coolify → `coolify-vps/coolify.sh env-set <uuid> KEY value` then `coolify.sh restart <uuid>` (restart, not deploy — Vite rebuilds can OOM). Dokploy → `oracle-vps` dokploy-ops skill / saveEnvironment + redeploy.",
+        "Upsert the harvested OAuth + reCAPTCHA vars (backend secrets server-side; public client ids/site keys can be frontend build vars). Flip the *_ENABLED flags on.",
+        "Coolify injects env at container create + Spring reads @Value at boot → a restart is REQUIRED to apply.",
+        "Confirm DNS first (dig +short <host>) — aniamodels.shop is split across Dokploy and Coolify. After redeploy, hit the health endpoint + GET /auth/config to confirm the flags/keys took."
+      ],
+      "harvest": [],
+      "gotcha": "Coolify env change needs a restart to apply. Frontend public vars are baked at BUILD time — a Vite app needs a redeploy/rebuild (not just restart) to pick up a new VITE_ value."
+    }
+  }
+}

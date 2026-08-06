@@ -128,7 +128,10 @@ retry only what you trim it down to.
 `generate` flags: `--transparent|--opaque` (default opaque) · `--provider auto|openai|gemini|kling`
 (auto = capability chain + fallback) · `--aspect 1:1|16:9|9:16|3:4|4:3|...` · `--quality
 low|medium|high` (OpenAI) · `--image-size 1K|2K|4K` (Gemini-3 only) · `--ref <img>` (edit) ·
-`--model <id>` · `--json`.
+`--model <id>` · `--json` · `--ref` is **repeatable** for multi-image fusion
+(`--ref pose.png --ref face.jpg`) — pass it twice to do a **face-swap**: first ref = the
+original image (pose/clothes/lighting to keep), second ref = the real person's face. Works on
+OpenAI (keeps alpha) and Gemini (photoreal). The `remodeling` agent uses this.
 
 `video` flags: `--prompt` · `--out *.mp4` · `--ref <img>` (omit → text2video) · `--aspect` ·
 `--duration 5|10` · `--kmode std|pro` · `--model`.

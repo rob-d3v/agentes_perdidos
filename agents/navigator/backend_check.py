@@ -29,7 +29,7 @@ Env (all optional; see .env.example):
     CHROME_REMOTE_DEBUG_URL   Tier 2 attach target, default http://127.0.0.1:9222
     CAMOFOX_URL               Tier 3 Camofox REST base, e.g. http://localhost:9377
     BROWSER_CDP_URL           Tier 3 raw-CDP endpoint (optional)
-    HERMES_VPS_HOST           Tier 3 VPS fallback host, e.g. 64.181.172.102
+    HERMES_VPS_HOST           Tier 3 VPS fallback host, e.g. 203.0.113.10
 
 Exit 0 always (it's a report). The recommended tier is printed and in JSON `recommended`.
 """

@@ -1,0 +1,25 @@
+{
+  "_about": "TEMPLATE consumed by verify_token.py (Lane-A harness). Copy to <app>.social.json and fill in the real endpoints/flags for the target project. No secrets here — this file is committed; secrets stay in the gitignored backend .env. IDs/last-4 only in any doc.",
+  "app": "example-app",
+  "base_url": "http://localhost:8080",
+  "providers": {
+    "google": {
+      "endpoint": "/api/auth/google",
+      "enabled_flag": "GOOGLE_OAUTH_ENABLED",
+      "client_type": "web"
+    },
+    "facebook": {
+      "endpoint": "/api/auth/facebook",
+      "enabled_flag": "FACEBOOK_OAUTH_ENABLED",
+      "client_type": "web"
+    },
+    "x": {
+      "endpoint": "/api/auth/x",
+      "enabled_flag": "X_LOGIN_ENABLED",
+      "client_type": "web",
+      "note": "shipped flag-OFF by default (X free tier ended Feb 2026 → pay-per-use)"
+    }
+  },
+  "auth_me": "/api/auth/me",
+  "db_check": "SELECT 1 FROM user_oauth_identities WHERE provider=? AND email=? -- expect exactly one row after a find-or-link (no duplicate user)"
+}

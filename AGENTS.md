@@ -24,10 +24,13 @@ project ("lost" in someone else's codebase).
   at, not on `agentes_perdidos`.
 - **Persist project state in the target project's own brain, not here.** When an agent needs to
   record notes, tasklists, key-maps, decisions or progress to do its job well across sessions,
-  it writes them into the *target project's* knowledge store: an existing `llm-wiki` /
-  `.llm-wiki/` / `wiki/` dir if one exists, otherwise a `./.<agent-name>/` dir at the target
-  project root (e.g. `./.i18n/`). This keeps `agentes_perdidos` clean and makes the agent
-  resumable on that project. Never commit secrets or large generated artifacts to the project.
+  it writes them into the *target project's* knowledge store: the **second-brain** LLM-wiki
+  inside that project's Obsidian vault (the folder with `.obsidian/`) if present — else an
+  existing `.llm-wiki/` / `wiki/` dir, else a `./.<agent-name>/` dir at the target project root
+  (e.g. `./.i18n/`). This keeps `agentes_perdidos` clean and makes the agent resumable on that
+  project. Never commit secrets or large generated artifacts to the project. Generic,
+  non-confidential knowledge shared across projects lives once in
+  `agents/second-brain/shared/` and is linked, not duplicated.
 - **Self-improvement flows back here.** If an agent discovers something *generalizable* — a new
   stack adapter, a better heuristic, a recurring gotcha — it updates **its own `SKILL.md`** in
   this repo. Project-specific facts stay in the project's brain; reusable lessons come home.

@@ -9,10 +9,14 @@ description: >
   credentials/IDs (sk_/rk_/pk_ keys, price_/prod_ ids, whsec_ webhook secrets) which it writes
   into the TARGET project's gitignored .env — never into agentes_perdidos. It can CREATE Stripe
   structure where missing and HARVEST from accounts already set up, in both TEST and LIVE mode.
-  It is the hands/eyes that pairs with the `stripe` agent's brain (code + validation + PDF).
+  It is the hands/eyes that pairs with the `stripe` agent's brain (code + validation + PDF), and
+  equally with the `social-auth` and `captcha` agents: it creates the Google/Facebook OAuth apps
+  and reCAPTCHA/Turnstile keys in their consoles and harvests the client ids/secrets + site/secret
+  keys into the target project's .env (see `auth_playbook.json`).
   Trigger when a task needs a human to click a dashboard: "log into Stripe and harvest the keys",
   "create the live products + restricted key + webhook", "do the GUI part stripe can't", "type
-  the test card on the hosted checkout", "set the env vars in Coolify/Dokploy".
+  the test card on the hosted checkout", "set the env vars in Coolify/Dokploy", "create the Google
+  + Facebook OAuth apps and harvest the credentials", "create the reCAPTCHA keys".
 ---
 
 # navigator
@@ -46,7 +50,7 @@ Always run `backend_check.py --surface <x>` first — it tells you which tier is
 | Generic dashboard, fast DOM, non-financial | **1** | Claude-in-Chrome MCP (`mcp__Claude_in_Chrome__*`) | Default. Fastest, DOM-aware. |
 | `dashboard.stripe.com` — products, keys, webhooks, portal, harvest | **2** | chrome-devtools-mcp (Puppeteer) | Tier 1 refuses Stripe; Tier 2 is not safety-policed. |
 | `checkout.stripe.com` — test-card entry, 3DS, declines | **2** | chrome-devtools-mcp | The exact PENDING surface from the `stripe` agent. |
-| Anti-detection / bot-walled login / local Chrome blocked | **3** | hermes Camofox (`CAMOFOX_URL`) / CDP / VPS `64.181.172.102` | Stealth Firefox when Tier 2 is challenged/detected. |
+| Anti-detection / bot-walled login / local Chrome blocked | **3** | hermes Camofox (`CAMOFOX_URL`) / CDP / VPS `<HERMES_VPS_HOST>` | Stealth Firefox when Tier 2 is challenged/detected. |
 | Coolify / Dokploy env panel | **1** | Claude-in-Chrome MCP | Not financial — Tier 1 is fine. |
 | Native desktop panel, no web surface, all browsers fail | **4** | computer-use MCP (`mcp__computer-use__*`) | Last resort. Pixel-level, slowest. |
 
@@ -89,7 +93,7 @@ Reached via hermes' own CLI/MCP, not as an MCP added here. Local repo:
 `E:\backup_2026\Repositórios\hermes-agent\tools\` has `browser_camofox.py` (Camoufox stealth
 Firefox, REST on `CAMOFOX_URL` e.g. `http://localhost:9377`, `/health`), `browser_cdp_tool.py`
 (raw CDP via `BROWSER_CDP_URL`), `browser_tool.py`. Also deployed on the oracle-vps
-(`64.181.172.102`, Dokploy). Use only when Tier 2 is detected/challenged.
+(`<HERMES_VPS_HOST>`, Dokploy). Use only when Tier 2 is detected/challenged.
 
 ## 3. Login & 2FA
 I do **not** solve 2FA or store passwords. The **operator logs in interactively once** in the
@@ -207,7 +211,36 @@ hand to `stripe`.
 - **Live blast radius** — wrong live action exposes a live key. Containment = live gate +
   `--allow-live` + last-4-only docs + never-write-to-agentes_perdidos.
 
-## 12. How the user invokes me
+## 12. OAuth + CAPTCHA console playbooks (pairs with `social-auth` + `captcha`)
+Beyond Stripe, I drive the auth/anti-bot consoles. Get the ordered checklist from the **auth**
+playbook (same runner, different file):
+```
+uv run agents/navigator/playbook_run.py --playbook auth --list
+uv run agents/navigator/playbook_run.py --playbook auth --surface <key> --mode dev|prod
+```
+Surfaces (data in `auth_playbook.json`; all Tier 1 — these are non-financial dashboards, so
+Claude-in-Chrome works; escalate per the matrix only if challenged):
+- **google-consent** — Google Auth Platform (2026 UI): Branding → Audience → Data Access scopes
+  (openid/email/profile) → publish. (Old "OAuth consent screen" path is stale.)
+- **google-oauth-client** — create the Web / Android / iOS / Desktop client; register the EXACT
+  redirect URIs + JS origins the `social-auth` agent gives you; harvest **Client ID** (public) +
+  **Client secret** (backend-only; web/desktop only — native is secretless PKCE).
+- **facebook-app** — Meta for Developers: create app → Facebook Login use case → Strict-Mode
+  redirect URIs; harvest **App ID** (public) + **App secret** (backend-only) + client token.
+- **recaptcha-key** — reCAPTCHA admin: create v3 (+ a separate v2 fallback) key, register domains
+  (host only); harvest **Site key** (public) + **Secret key** (backend-only).
+- **turnstile-widget** — Cloudflare alt (unused this round); the official Cloudflare MCP can do
+  widget CRUD without clicking.
+- **deploy-panel-auth** — inject the harvested OAuth/reCAPTCHA vars via `coolify.sh`/Dokploy +
+  restart, flip the `*_ENABLED` flags, confirm via `/auth/config` + health.
+
+**Inputs I need from the brain agents** (don't guess these): application type per surface, the
+exact redirect URIs + JS origins (dev + prod), the domains to allow (captcha), and the **env var
+name** to write each credential into. **Handoff back:** I write the ids/secrets into the target
+`.env` with `secrets_writer.py` (GUARD-5 refuses a secret in a public `VITE_/EXPO_PUBLIC_/…` var),
+hand a key-map (ids + last-4), and say "creds are in `.env`; wire + validate."
+
+## 13. How the user invokes me
 Open an LLM session in the target project and point it here, e.g.:
 > Read `…/agentes_perdidos/agents/navigator/SKILL.md`. Tier-2 is up and I'm logged into Stripe.
 > Create the TEST products + restricted key + webhook for this project, harvest them into `.env`,

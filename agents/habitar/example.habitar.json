@@ -1,0 +1,170 @@
+{
+  "schema": 1,
+  "_readme": [
+    "Config-driven so the same two scripts work on Spring+React, Next, Django, Rails, anything.",
+    "ALL stack knowledge lives here; the scripts only do HTTP, counting and regex.",
+    "Written by the agent during `audit` after reading the codebase once.",
+    "Start from `liveness.py --init <base_url>`, then fill in the parts a sitemap cannot know:",
+    "item selectors, section queries, and which sections must be distinct from each other."
+  ],
+
+  "app": {
+    "id": "example",
+    "name": "Example Marketplace",
+    "base_url": "https://example.com",
+    "locales": ["pt-BR", "en"],
+    "stack": "spring-boot+react-vite (informational only — scripts never branch on this)"
+  },
+
+  "auth": {
+    "_note": "Key NAMES only. Never inline a secret here — this file is committed.",
+    "mode": "none",
+    "token_env": "HABITAR_EXAMPLE_TOKEN"
+  },
+
+  "identity": {
+    "_note": "Used to keep first-party activity out of public counters and to flag undisclosed first-party supply.",
+    "first_party_accounts": ["official"],
+    "staff_accounts": ["founder", "admin"],
+    "demo_accounts": []
+  },
+
+  "freshness_field": "createdAt",
+
+  "data_sources": [
+    {
+      "id": "listings",
+      "url": "/api/listings?page=0&size=200",
+      "items_path": "",
+      "_items_path": "'' when the response IS the array; 'content' for a Spring Page; 'data.items' for nested.",
+      "id_key": "id"
+    }
+  ],
+
+  "surfaces": [
+    {
+      "id": "home",
+      "url": "/",
+      "weight": 3,
+      "freshness_field": "createdAt",
+      "sections": [
+        {
+          "id": "latest",
+          "source": "listings",
+          "id_key": "id",
+          "item_selector": "[data-listing-card]",
+          "select": { "sort_by": "createdAt", "order": "desc", "limit": 8 },
+          "expects": { "min_items": 4, "target_items": 8, "dedupe_key": "data-listing-id" }
+        },
+        {
+          "id": "popular",
+          "source": "listings",
+          "id_key": "id",
+          "item_selector": "[data-listing-card]",
+          "select": { "sort_by": "downloads", "order": "desc", "limit": 8 },
+          "expects": {
+            "min_items": 4,
+            "target_items": 8,
+            "dedupe_key": "data-listing-id",
+            "distinct_from": ["latest"]
+          }
+        },
+        {
+          "id": "top_rated",
+          "source": "listings",
+          "id_key": "id",
+          "select": { "sort_by": "downloads", "order": "desc", "limit": 8 },
+          "expects": {
+            "target_items": 8,
+            "distinct_from": ["latest", "popular"],
+            "_why": "declare `select` as what the code ACTUALLY renders, not what the heading promises. If a section is labelled 'top rated' but the code hands it the popular array, model it as popular — the overlap check is what surfaces the lie."
+          }
+        }
+      ],
+      "invitation": {
+        "empty_state_selector": "[data-empty-state]",
+        "cta_text": "be the first",
+        "capture_selector": "form[data-capture]",
+        "capture_text": "notify me"
+      }
+    },
+    {
+      "id": "catalog",
+      "url": "/marketplace",
+      "weight": 2,
+      "sections": [
+        {
+          "id": "all",
+          "source": "listings",
+          "id_key": "id",
+          "item_selector": "[data-listing-card]",
+          "select": {},
+          "expects": { "min_items": 8, "target_items": 40 }
+        }
+      ],
+      "invitation": { "cta_text": "sell your first", "capture_text": "notify me" }
+    }
+  ],
+
+  "claims": [
+    {
+      "id": "player-rating",
+      "type": "aggregate_rating",
+      "surface": "home",
+      "where": "index.html:139",
+      "asserted": { "ratingValue": 4.8, "ratingCount": 50 },
+      "substantiated_by": null,
+      "_": "null => UNSUBSTANTIATED => H drops to 0.5 on this surface. Fix by wiring to a data_source or by not asserting it."
+    },
+    {
+      "id": "sameas-github",
+      "type": "outbound",
+      "surface": "home",
+      "where": "index.html:95",
+      "asserted": "https://github.com/example-org",
+      "substantiated_by": "http_200"
+    },
+    {
+      "id": "launch-promo",
+      "type": "scarcity",
+      "surface": "home",
+      "where": "application.properties:106",
+      "asserted": "free uploads until 2026-12-30",
+      "substantiated_by": "config",
+      "_": "Real and config-backed is fine — but it MUST render from that config, never hardcoded in the UI, or the claim outlives the config."
+    }
+  ],
+
+  "claim_hosts": [
+    "github.com", "discord.gg", "discord.com", "instagram.com", "youtube.com",
+    "facebook.com", "linkedin.com", "x.com", "twitter.com", "tiktok.com"
+  ],
+  "_claim_hosts": "Only these outbound hosts get live-verified — links the site presents as proof something exists. Set to null to verify every outbound link.",
+
+  "promise_patterns": [
+    "href=[\"']#[\"']",
+    "lorem ipsum",
+    "TODO",
+    "FIXME",
+    "example\\.com",
+    "placeholder",
+    "coming soon"
+  ],
+
+  "scan_paths": [
+    "frontend/src/**/*.tsx",
+    "frontend/src/**/*.ts",
+    "frontend/index.html",
+    "src/main/resources/*.properties"
+  ],
+
+  "thresholds": {
+    "aggregate_rating_min_n": 5,
+    "default_target_items": 8,
+    "sessions_per_week_floor": 50,
+    "max_outbound_checks": 40,
+    "stale_days": 30
+  },
+
+  "baseline": ".habitar/baseline.json"
+}

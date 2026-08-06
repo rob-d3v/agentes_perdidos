@@ -75,11 +75,36 @@ PRESETS: dict[str, dict] = {
             '{"match": true|false, "confidence": 0-100, "why": "<8 words>"}.'
         ),
     },
+    # Writing course: "Escritores Independentes" with Marina Blanc. Slides (pptx/pdf)
+    # + any loose fantasy/creative-writing docs. Matched by TEXT keywords (pt-BR), not
+    # color — so it scores pdfs AND slides (pptx/odp), surviving renames.
+    "escritores": {
+        "describe": "Curso Escritores Independentes (Marina Blanc) — slides/PDF + literatura/escrita criativa",
+        "colors": [],                          # text-only target; no color signature
+        "filename_kw": [
+            "marina", "blanc", "escritor", "escritores", "independ", "escrita",
+            "literatura", "curso", "aula", "modulo", "módulo", "slide", "apostila",
+            "fantasi", "fantástic", "fantastic", "narrativ", "romance", "conto",
+            "worldbuilding", "personagem", "enredo", "roteiro",
+        ],
+        "pdf_kw": [
+            "marina blanc", "escritores independentes", "escrita criativa",
+            "escritor", "literatura", "narrativa", "personagem", "enredo", "trama",
+            "protagonista", "antagonista", "arco", "worldbuilding", "mundo",
+            "fantasia", "ficção", "ficcao", "romance", "conto", "capítulo", "capitulo",
+            "manuscrito", "publicar", "publicação", "autopublicação", "editora",
+            "revisão", "revisao", "amazon kdp", "wattpad", "leitor", "história", "historia",
+            "ponto de vista", "diálogo", "dialogo", "showing", "telling",
+        ],
+    },
 }
 
 # Extensions we care about
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 PDF_EXTS = {".pdf"}
+# Slide decks + writing docs whose TEXT we keyword-score (pptx/odp via zip-xml, see read_text_any)
+SLIDE_EXTS = {".pptx", ".ppt", ".odp", ".key"}
+DOCTEXT_EXTS = {".docx", ".odt", ".rtf", ".md", ".txt", ".epub"}
 
 # Directories never worth walking (noise / system / huge)
 SKIP_DIR_NAMES = {
@@ -256,7 +281,7 @@ def should_skip(dirpath: str) -> bool:
 def cmd_scan(args) -> list[Candidate]:
     roots = resolve_roots(args)
     print(f"[scan] roots: {', '.join(str(r) for r in roots)}", file=sys.stderr)
-    want_ext = (IMAGE_EXTS | PDF_EXTS)
+    want_ext = (IMAGE_EXTS | PDF_EXTS | SLIDE_EXTS | DOCTEXT_EXTS)
     cands: list[Candidate] = []
     seen = 0
     t0 = time.time()
@@ -281,14 +306,22 @@ def cmd_scan(args) -> list[Candidate]:
                 seen += 1
                 if args.min_kb and st.st_size < args.min_kb * 1024:
                     continue
-                kind = "pdf" if ext in PDF_EXTS else "image"
+                if ext in PDF_EXTS:
+                    kind = "pdf"
+                elif ext in IMAGE_EXTS:
+                    kind = "image"
+                elif ext in SLIDE_EXTS:
+                    kind = "slide"
+                else:
+                    kind = "doc"
                 cands.append(Candidate(fp, st.st_size, st.st_mtime, ext, kind))
     dt = time.time() - t0
     print(f"[scan] {len(cands)} candidates ({sum(c.kind=='image' for c in cands)} img / "
           f"{sum(c.kind=='pdf' for c in cands)} pdf) in {dt:.1f}s", file=sys.stderr)
     if args.index:
         Path(args.index).write_text(
-            json.dumps([asdict(c) for c in cands], ensure_ascii=False, indent=0))
+            json.dumps([asdict(c) for c in cands], ensure_ascii=False, indent=0),
+            encoding="utf-8")
         print(f"[scan] index → {args.index}", file=sys.stderr)
     return cands
 
@@ -363,6 +396,53 @@ def cmd_pdfs(args, cands=None):
     return rows
 
 
+def cmd_docs(args, cands=None):
+    """Score slide decks (pptx/odp) + writing docs (docx/txt/md/epub) by TEXT keywords.
+    Reuses read_text_any (zip-xml for office/slides, pypdf for pdf). Same ranking idea as
+    cmd_pdfs but for the formats a 'curso' / 'apostila' / 'slides' actually ships in."""
+    preset = PRESETS[args.preset]
+    pkw = preset["pdf_kw"]          # content keywords (shared with pdf target)
+    fkw = preset["filename_kw"]
+    cands = cands or load_index(args.index)
+    docs = [c for c in cands if c.kind in ("slide", "doc")]
+    print(f"[docs] reading text of {len(docs)} slides/docs …", file=sys.stderr)
+    rows = []
+    for i, c in enumerate(docs):
+        if i % 100 == 0 and i:
+            print(f"  …{i}/{len(docs)}", file=sys.stderr)
+        try:
+            blob = read_text_any(Path(c.path)).lower()
+        except Exception:
+            blob = ""
+        hits = sorted({k for k in pkw if k.lower() in blob})
+        fcount, fhits = filename_score(Path(c.path), fkw)
+        total = len(hits) * 5 + fcount * 6
+        if total <= 0:
+            continue
+        rows.append({
+            "score": total, "kw_hits": hits, "fname_hits": fhits,
+            "kind": c.kind, "ext": c.ext,
+            "mtime": time.strftime("%Y-%m-%d", time.localtime(c.mtime)),
+            "size_kb": c.size // 1024, "path": c.path,
+        })
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    print(f"\n=== TOP {min(args.top,len(rows))} SLIDES/DOCS ===")
+    for r in rows[: args.top]:
+        fn = f" fname={r['fname_hits']}" if r.get("fname_hits") else ""
+        print(f"  {r['score']:>6}  {r['mtime']}  {r['size_kb']:>6}KB  {r['ext']:>5}  kw={r['kw_hits']}{fn}")
+        print(f"          {r['path']}")
+    if args.csv:
+        with open(args.csv, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else ["path"])
+            w.writeheader()
+            for r in rows:
+                w.writerow({k: (",".join(v) if isinstance(v, list) else v) for k, v in r.items()})
+        print(f"[docs] full ranking → {args.csv}", file=sys.stderr)
+    if args.copy_top:
+        _copy_top(rows, args.copy_top, args.out or "found/docs")
+    return rows
+
+
 # ===========================================================================
 # SECRETS MODE — recover a user's OWN lost wallet credentials on their OWN PC.
 # Finds: BIP39 seed phrases (12/18/24 valid words, checksum-checked), wallet
@@ -407,12 +487,14 @@ def _bip39_wordset():
 def read_text_any(path: Path, max_bytes: int = 5_000_000) -> str:
     """Best-effort text extraction from plain text, office (zip/xml), and pdf."""
     ext = path.suffix.lower()
+    ZIP_XML_EXTS = DOC_EXTS | {".odp", ".odt", ".ods", ".key"}  # zip-of-xml office/slide formats
     try:
-        if ext in DOC_EXTS:
+        if ext in ZIP_XML_EXTS:
             import zipfile, re as _re
             parts = []
             with zipfile.ZipFile(path) as z:
                 for n in z.namelist():
+                    # *.xml covers OOXML (slide/document/sheet); content.xml covers ODF/Keynote
                     if n.endswith(".xml") and ("document" in n or "sheet" in n
                                                or "slide" in n or "content" in n):
                         parts.append(_re.sub(r"<[^>]+>", " ", z.read(n).decode("utf-8", "ignore")))
@@ -736,8 +818,10 @@ def _copy_top(rows, n, outdir):
 def cmd_hunt(args):
     cands = cmd_scan(args)
     args.copy_top = args.copy_top or 15
-    imgs = cmd_images(args, cands)
+    # text-only preset (e.g. escritores): skip the color/image stage entirely
+    imgs = cmd_images(args, cands) if PRESETS[args.preset].get("colors") else []
     pdfs = cmd_pdfs(args, cands)
+    docs = cmd_docs(args, cands)
     # markdown report
     rep = Path(args.report or "found/report.md")
     rep.parent.mkdir(parents=True, exist_ok=True)
@@ -756,6 +840,11 @@ def cmd_hunt(args):
     for r in pdfs[: args.top]:
         lines.append(f"| {r['score']} | {r['mtime']} | {r['pages']} | "
                      f"{','.join(r['kw_hits'])}{' [SCANNED]' if r['scanned'] else ''} | `{r['path']}` |")
+    lines += ["\n## Top slide/doc matches (pptx / docx / txt)\n",
+              "| score | date | ext | keyword hits | path |", "|--:|--|--|--|--|"]
+    for r in docs[: args.top]:
+        lines.append(f"| {r['score']} | {r['mtime']} | {r['ext']} | "
+                     f"{','.join(r['kw_hits'])} | `{r['path']}` |")
     rep.write_text("\n".join(lines), encoding="utf-8")
     print(f"\n[hunt] report → {rep.resolve()}", file=sys.stderr)
 
@@ -791,6 +880,8 @@ def build_parser():
     sp.add_argument("--colors", help="override preset colors, e.g. 'yellow,blue'")
 
     sp = sub.add_parser("pdfs"); common(sp)
+
+    sp = sub.add_parser("docs"); common(sp)  # slides (pptx/odp) + writing docs (docx/txt/md/epub)
 
     sp = sub.add_parser("verify"); common(sp)
     sp.add_argument("--colors")
@@ -833,6 +924,8 @@ def main():
         cmd_images(args)
     elif args.cmd == "pdfs":
         cmd_pdfs(args)
+    elif args.cmd == "docs":
+        cmd_docs(args)
     elif args.cmd == "verify":
         cmd_verify(args)
     elif args.cmd == "secrets":

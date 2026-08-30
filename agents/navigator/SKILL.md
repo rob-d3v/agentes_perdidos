@@ -100,6 +100,67 @@ I do **not** solve 2FA or store passwords. The **operator logs in interactively 
 warm browser profile; I reuse that session. If I detect a logout/redirect-to-login, I pause and
 ask the operator to re-authenticate. Never type credentials I was given in chat into a form.
 
+### 3.1 How to actually reach the operator (don't stall in silence)
+"Pause and ask" is worthless in a scheduled or headless run — nobody is watching the transcript.
+Wire a **callback channel** before running unattended, or the job just dies waiting.
+
+Hermes ships one that needs no LLM and no running gateway for bot-token platforms:
+```bash
+hermes send -t telegram "Need your 20 seconds: OTP on <surface>. Tab is parked at the right step."
+# also: discord, slack, signal, or platform:chat_id
+```
+Setup once: `TELEGRAM_BOT_TOKEN` in the env → operator messages the bot → approve the pairing code
+it returns (`hermes pairing approve telegram <CODE>`) → set a home channel so a bare `-t telegram`
+resolves. **The operator must message the bot first** — Telegram bots cannot open a conversation,
+so a token alone gets you a channel that can never deliver.
+
+Pair this with the `clarify` toolset: `clarify` stops the agent cleanly, `hermes send` is what
+makes the human find out. One without the other is a hang.
+
+**Ask in the same beat you block.** Name the surface, the step, and confirm the tab is already
+parked there. "Need OTP" costs the operator a context switch; "OTP on the Meta app review, tab is
+open on step 3" costs them twenty seconds.
+
+### 3.2 Warm-session tier — prefer it over anti-detect on consented surfaces
+Beyond the four tiers in §1, Hermes attaches to the operator's **own already-logged-in browser**
+over CDP. Right default whenever the operator is around: it sidesteps the fingerprint arms race
+entirely, because it isn't a synthetic profile — it's their real session.
+
+```bash
+# dedicated profile so the debug port comes up even if their normal browser is already running
+chrome --remote-debugging-port=9222 --user-data-dir=<dedicated-profile>
+```
+```yaml
+# ~/.hermes/config.yaml — persistent, unlike the interactive `/browser connect`
+browser:
+  cdp_url: "http://127.0.0.1:9222"
+```
+`/browser connect` is an **interactive-CLI slash command only** — the gateway does not dispatch it,
+so a cron or webhook job will never see it. Scheduled work needs `cdp_url` in config.
+
+> ⚠️ **Do not reuse the anti-detect tiers on social platforms.** The ladder in §1 was designed for
+> developer and billing consoles, which don't police automation. Social platforms do, and in 2026
+> they score *behaviour* — scroll velocity, keystroke cadence, inter-action timing — not just
+> fingerprint. A stealth browser that wins on fingerprint still loses, and the penalty lands on the
+> operator's scarcest asset: the accounts that already exist. Consoles: any tier. Social: warm
+> session with the human present, or nothing.
+
+### 3.3 Browser driver: `browser_exec` vs the built-in tools
+Hermes defaults to **Browser Use mode** — the model writes and executes Python to drive the page.
+Flexible, but it iterates, and with a weak model a single page read can take minutes. The built-in
+tools instead hand the model an accessibility tree.
+
+Neither is universally better; the tradeoff is real and worth measuring per surface:
+
+- **Browser Use** — slow, many round trips, but the request stays small.
+- **Built-in tools** — fewer round trips, but ships the whole accessibility tree, which on a heavy
+  page can exceed what a provider accepts. Seen in the wild: `HTTP 503: Structurally heavy chat
+  request capacity is busy`. If that fires, either move to a long-context model or go back to
+  `browser_exec`.
+
+Switch with `/browser use off`, or `browser.backend: "off"` in config. **Time both against the same
+page before committing** — the answer differs by page weight and by model.
+
 ## 4. Stripe-dashboard playbooks
 Get the exact ordered checklist + the right URL per mode from:
 ```

@@ -13,7 +13,7 @@ description: >
 Cron-driven backup for any docker VPS, plus one-command disaster recovery. Self-contained:
 needs only `python3 + boto3 + docker` on the box — no repo checkout, no `uv`.
 
-Shares the **PRIVATE** B2 bucket of the `bucket` agent (`B2_PRIVATE_*` → `backupPessoalrobsDEV`).
+Shares the **PRIVATE** B2 bucket of the `bucket` agent (`B2_PRIVATE_*` → your private bucket).
 The bucket is private by design; these are archival backups, never browser-served.
 
 ## Files
@@ -58,8 +58,8 @@ guardian-restore restore --host coolify --volume foo_pg-data --when weekly:20260
 
 ```bash
 GUARDIAN_HOST_LABEL=coolify \
-B2_KEY_ID=… B2_APPLICATION_KEY=… B2_BUCKET=backupPessoalrobsDEV B2_REGION=us-east-005 \
-WA_API_URL=https://evo.obra.vision WA_INSTANCE=diario_obras_instance WA_API_KEY=… WA_NUMBER=55… \
+B2_KEY_ID=… B2_APPLICATION_KEY=… B2_BUCKET=<your-private-bucket> B2_REGION=us-east-005 \
+WA_API_URL=https://<your-evolution-host> WA_INSTANCE=<instance> WA_API_KEY=… WA_NUMBER=55… \
 bash install_guardian.sh
 ```
 

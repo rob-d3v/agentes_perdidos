@@ -36,10 +36,20 @@ def load_b2(path: str) -> dict:
 
 
 def client(b2: dict):
+    """Same transport tuning as backup_guardian.b2_client(): botocore's 60s read_timeout
+    is far below the time B2 needs to serve a multi-GB archive, and a restore that dies
+    on a spurious timeout is a restore that failed when it was actually needed."""
     import boto3
+    from botocore.config import Config
+    conf = Config(
+        signature_version="s3v4",
+        connect_timeout=int(b2.get("connect_timeout", 30)),
+        read_timeout=int(b2.get("read_timeout", 900)),
+        retries={"max_attempts": int(b2.get("max_attempts", 3)), "mode": "standard"},
+    )
     return boto3.client("s3", endpoint_url=b2["endpoint"], aws_access_key_id=b2["key_id"],
                         aws_secret_access_key=b2["application_key"],
-                        region_name=b2.get("region", "us-east-005"))
+                        region_name=b2.get("region", "us-east-005"), config=conf)
 
 
 def human(n: int) -> str:

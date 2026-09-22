@@ -34,6 +34,12 @@ project ("lost" in someone else's codebase).
 - **Self-improvement flows back here.** If an agent discovers something *generalizable* — a new
   stack adapter, a better heuristic, a recurring gotcha — it updates **its own `SKILL.md`** in
   this repo. Project-specific facts stay in the project's brain; reusable lessons come home.
+- **One pending-work contract.** At the start of work, read the target project's root
+  `PENDENCIAS.md` when present. Before handoff, keep durable remaining work there using Markdown
+  checkboxes and explicit ownership: `[owner: agent]`, `[owner: user]` or `[owner: approval]`.
+  Preserve completed items as `[x]` with evidence; never put secrets in the queue. The canonical
+  contract lives in the private central brain at
+  `E:\backup_2026\Repositórios\my-second-brain\dashboard-pendencias\PADRAO-PENDENCIAS.md`.
 
 ## Rules
 

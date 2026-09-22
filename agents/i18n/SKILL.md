@@ -198,6 +198,12 @@ Run this gate before reporting completion. If any item fails, go back to step 2/
       runs) — not just `tsc --noEmit`. Catches `t`-var collisions + prop-rename mismatches.
 - [ ] `status.py` reports `incomplete: 0`, `missing files: 0`, **and `empty base values: 0`**
       across all ~190 langs.
+- [ ] **No silent content loss**: for every target locale, the `\n` count and the placeholder set
+      of each value match the base. `status.py` cannot see this — a truncated value still counts
+      as "present". See the gtx-truncation gotcha.
+- [ ] **Every shipped locale is reachable**: switching to each code actually loads that code's own
+      file (not the fallback). See the reachability gotcha — this catches dead region/script
+      variants that coverage reports happily call 100%.
 - [ ] The language switcher in settings lists the languages and actually changes + persists.
 - [ ] **Pre-auth switcher present**: every separate landing page and login/signup page exposes
       the switcher (shared component), it works with no session, and landing+login+signup copy
@@ -322,10 +328,124 @@ project's loader (`get_text`/`getString` path); if it doesn't decode `\n`, fix i
 single-pass decoder (`\uXXXX` + `\n \t \r \\`) so it matches the Java side. Single-pass matters
 so an escaped backslash `\\` isn't double-processed.
 
+## Gotcha — gtx TRUNCATES long multi-line values (silent content loss)
+
+`translate.py` masks `\n` so it survives, but gtx still **drops trailing content** when a single
+value is long and multi-line: an 8-step "enable Stereo Mix" guide comes back as its first line
+only. Nothing errors — the locale just quietly loses paragraphs. Worse, it is invisible to
+`status.py` (the key *has* a value) and to `audit.py` (the key exists in base). On AniaAPP this
+had eaten 24 distinct keys **× 190 languages = 3840 values**, most of them the highest-value
+strings in the app (setup guides, license explanations, welcome wizard).
+
+Detect it with a base-vs-target `\n`-count comparison, and fix by translating **segment by
+segment**: split the source on the literal `\n`, translate each piece (short => no truncation),
+rejoin with the same separators. Add this check to every run:
+
+```python
+nl = {k: v.count('\\n') for k, v in base.items()}
+trunc = [k for k in target if nl.get(k) and target[k].count('\\n') < nl[k]]
+```
+
+Same sweep should compare **placeholder sets** base-vs-target — gtx also loses `{0}` on long
+strings, which silently drops the device name / error detail the code passes to `.format()`.
+The durable repair for both: delete the defective entries from the machine locales, then re-run
+`translate.py` (it only fills what's missing), and segment-translate whatever is still truncated.
+
+## Gotcha — verify locales are actually REACHABLE, not merely present
+
+Shipping `messages_zh-TW.properties` does not mean a user can select Traditional Chinese. A
+locale resolver that **canonicalises before trying the exact code** silently collapses region and
+script variants, because a base→canonical map holds exactly one variant per language (`zh` for
+both Chinese scripts, `fr` for both French ones). On AniaAPP, `set_language('zh-TW')` was
+rewritten to `zh`, no `messages_zh.properties` is shipped, and the locale fell through to the
+English fallback — **6 complete files were dead** (`fr-CA`, `fr-FR`, `zh-CN`, `zh-TW` rendered
+English; `ms-Arab`, `pa-Arab` rendered the wrong script). Coverage reports said 100%.
+
+Correct resolution order is **exact code → canonical → bare base**. Add a reachability test to
+the done-gate — for every shipped code, switch to it and assert a probe key resolves to that
+file's own value:
+
+```python
+for code in shipped_codes:
+    set_language(code)
+    assert translate('button.save') == value_from(f'messages_{code}.properties')
+```
+
+Run it whenever the project has its own hand-rolled locale loader (Python/tkinter, custom React
+context) rather than a framework one. Note the test **persists** the language if the loader saves
+to config on switch — capture the user's original setting first and restore it at the end.
+
+## Gotcha — never pipe backslashes through a bash heredoc when writing .properties
+
+`.properties` values encode line breaks as the two characters `\n`. Writing them via
+`python - <<'PY'` inside the Bash tool mangles the escaping and silently writes a **real**
+newline, which splits one value across two lines and corrupts the file (the second line becomes
+a junk key). Write helper scripts with the Write tool instead, or build the escape as `chr(92)`.
+Guard the writer: refuse any value containing a real `\n`, and assert the `\n` count matches base.
+
 ## Gotcha — gtx placeholder masking covers precision formats
 
 `translate.py`'s `PLACEHOLDER_RE` masks `%s %d %1$s %.2f %+.3f %05d` and `{var} {{var}} {0}`.
 If a project uses an exotic format token, add it to the regex or gtx may corrupt it.
+
+## Gotcha — never glue a letter onto a printf token in a base value (`%ds`)
+
+The masker matches `%d` and stops, so the trailing `s` of `"Waiting %ds..."` is sent to gtx
+naked and comes back translated or moved. Write `"%d seconds"`. Same trap for `%dx`, `%dpx`,
+`%sh`. Rule for base authoring: **every placeholder is followed by a space or punctuation.**
+
+## Gotcha — a key literal ending in `.` is a dynamic prefix, not a missing key
+
+`Tools.translate("videoimport.zoomcorrect.level." + (level + 1))` puts the concatenation
+*outside* the quotes, so the captured literal is `videoimport.zoomcorrect.level.`. The old concat
+heuristic looked for `" +` *inside* the captured string and missed it, reporting a bogus
+`USED_BUT_MISSING` that blocks `--strict`. `audit.py` now treats a trailing dot as an
+unambiguous dynamic-prefix marker (no real key ends with `.`). Keep that rule when porting.
+
+## Gotcha — changing a base value after generating leaves ~190 locales silently stale
+
+`translate.py` only fills keys that are *missing*; it never revisits a key that already has a
+value. So an edited English string keeps its old translation everywhere, and nothing reports it —
+`status.py` sees a value, `audit.py` sees the key. Whenever you touch a base value after a
+generation run: **delete that key from every non-base locale, then re-run `translate.py`.** Track
+the edited keys as you go; reconstructing the list afterwards is guesswork.
+
+## Quality pass — when specific languages must be genuinely good, not merely present
+
+gtx is reach, not quality, and on a real project it is far worse than a spot-check suggests
+("About" → `在`, "My Models" → `我的模特` = *fashion* models, "Idle" → `怠惰` = laziness, "FPS:"
+→ `防曬指數` = sunscreen SPF). Budget a review pass for the languages that matter. What works:
+
+- **Fan out per (language × chunk of ~400 keys)**, feeding each reviewer the `{key, en, current}`
+  triple. Reviewers **write a `[{key, value}]` JSON** and never touch the locale file — same
+  no-parallel-writes rule as extraction. Merge centrally through a validator that rejects unknown
+  keys, empty values, raw newlines, and any **placeholder-multiset mismatch vs English**. Expect
+  50–75% of machine values to need fixing.
+- **Name the observed failure modes in the prompt**, not just "make it good". Quoting real errors
+  from the file is what turns a cosmetic pass into a real one. Ship the product facts too, with
+  an explicit "never invent a claim that is not in the source string".
+- **Reviewers audit your source language for free.** Three independent reviewers flagged that the
+  English said "Download" where the code and the pt-BR both meant *unload from memory*, and that
+  a button read "GUYS" — a mistranslation of the Portuguese "PESSOAL". Feed those back into base.
+- **Some MT defects are runtime bugs, not wording.** `%s`/`%d` came back in swapped order in
+  several strings, so the count would print in the filename's slot. The validator catches that
+  class; only a reader catches silently dropped sentences (see the truncation gotcha).
+- **zh-TW is not zh-CN with different characters.** Google character-converts, so the vocabulary
+  stays Mainland and reads foreign in Taiwan. Demand the TW forms explicitly: 軟體/影片/使用者/
+  登入/預設/檔案/資料夾/程式/網路/儲存/搜尋/設定/品質/解析度/專案/滑鼠/螢幕/匯入/匯出/視窗/影格.
+- **ja:** ですます調 for prose, 体言止め for buttons/labels, katakana for established loanwords.
+  Audit `自由` — correct for "freely / free-hand", wrong for free-of-charge (`無料`).
+- **gtx pads the literal `\n` escape with spaces** (`"...? \n \n Any unsaved..."`), rendering as a
+  stray space at the end and start of every line. Normalise across the generated locales, but
+  only for keys where the base has no space adjacent to the escape.
+
+Validator worth copying verbatim (it is what makes central merging safe):
+
+```python
+PLACE = re.compile(r"%(?:\d+\$)?[-+ 0#]*\d*(?:\.\d+)?[sdfxXeEgG@]|\{\d+\}|\\n|\\t")
+ok = (k in current) and v.strip() and "\n" not in v \
+     and Counter(PLACE.findall(v)) == Counter(PLACE.findall(base[k]))
+```
 
 ## The translation skill — `translate.py`
 

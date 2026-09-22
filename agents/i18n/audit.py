@@ -183,6 +183,12 @@ def scan_code(root, exts, ignore, names, label_fields):
             # 1) translation calls  →  used keys (+ dynamic prefixes)
             for m in call_re.finditer(text):
                 key = m.group(3)
+                # `t("a.b." + var)` — the concatenation lives OUTSIDE the quotes, so
+                # the captured literal simply ends with a dot. No real key ends with
+                # '.', so a trailing dot is an unambiguous dynamic-prefix marker.
+                if key.endswith(".") and "." in key[:-1]:
+                    dynamic.add(key[:-1])
+                    continue
                 if "${" in key or "' +" in key or '" +' in key:  # template / concat
                     pre = key.split("${")[0].split("' +")[0].split('" +')[0]
                     if "." in pre:

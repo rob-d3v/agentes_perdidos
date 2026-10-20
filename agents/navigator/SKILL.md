@@ -271,6 +271,20 @@ hand to `stripe`.
 - **Clipboard race** — the reveal animation can outrun a clipboard read; prefer DOM read.
 - **Live blast radius** — wrong live action exposes a live key. Containment = live gate +
   `--allow-live` + last-4-only docs + never-write-to-agentes_perdidos.
+- **chrome-devtools `upload_file` only reads paths inside the session's workspace roots** ("Access
+  denied: not within any of the configured workspace roots"). Copy the files into a folder under the
+  working directory, add it to `.git/info/exclude` (never commit client/author files), delete after.
+- **KDP (kdp.amazon.com) manuscript/cover upload**: the first `upload_file` right after a page
+  navigation often fails ("clicking it did not trigger a file chooser") while the page still shows
+  the *previous* "enviado com sucesso" banner — don't trust the banner; on failure re-snapshot and
+  retry (second try works). Check the uploaded timestamp (eBook) or the converted-file id in the
+  print-previewer URL (paperback) to prove it is the new file.
+- **KDP custom dropdowns** (print content page) don't take `fill`: click the combobox, then click the
+  visible `[role=option]`. Leaving the page for the **print previewer discards unsaved dropdown
+  changes** — set them after "Aprovar", then confirm the "respostas estão corretas" checkbox and
+  "Salvar como rascunho", and reload to verify.
+- **Declarations on the user's behalf** (e.g. KDP AI-content): fill only what is true today; if the
+  user asks for a false answer, leave it and tell them it's theirs to set.
 
 ## 12. OAuth + CAPTCHA console playbooks (pairs with `social-auth` + `captcha`)
 Beyond Stripe, I drive the auth/anti-bot consoles. Get the ordered checklist from the **auth**

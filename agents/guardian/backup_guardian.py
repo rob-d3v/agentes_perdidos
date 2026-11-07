@@ -430,7 +430,8 @@ def run_backup(cfg: dict) -> int:
 
     if s3 and ok_count and b2_ok == ok_count:
         open(os.path.join(folder, ".b2_ok"), "w").close()
-    cleanup_local(cfg)
+    # local_keep 0 = "only in B2": never drop a set that did not fully land there.
+    cleanup_local(cfg, only_b2_ok=int(cfg["local_keep"]) == 0)
     report = format_report(cfg, info, s3 is not None)
     send_whatsapp(cfg, report)
     log(f"=== DONE {status} {ok_count}/{len(items)} vols, B2 {b2_ok}/{ok_count}, {info['total_size']} in {info['duration']} ===")

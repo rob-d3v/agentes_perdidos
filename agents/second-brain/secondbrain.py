@@ -39,6 +39,7 @@ import math
 import os
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 WIKI = "wiki"
@@ -308,8 +309,17 @@ def _first_sentence(text: str) -> str:
 # --------------------------------------------------------------------------- #
 # search
 # --------------------------------------------------------------------------- #
+# accented latin letter -> base letter, one char for one ("pendência" == "pendencia")
+_FOLD = {c: unicodedata.normalize("NFD", chr(c))[0] for c in range(0xC0, 0x250)
+         if len(unicodedata.normalize("NFD", chr(c))) > 1}
+
+
+def _fold(s: str) -> str:
+    return s.lower().translate(_FOLD)
+
+
 def _tokens(s: str) -> list[str]:
-    return [t for t in re.findall(r"[a-z0-9]+", s.lower()) if t not in _STOP and len(t) > 1]
+    return [t for t in re.findall(r"[a-z0-9]+", _fold(s)) if t not in _STOP and len(t) > 1]
 
 
 def cmd_search(args) -> int:
@@ -336,10 +346,10 @@ def cmd_search(args) -> int:
     df = {}
     for p, text in _iter_pages(wiki_dir):
         fm = _parse_frontmatter(text)
-        body = text.lower()
-        title = (str(fm.get("title", "")) + " " + _slug(p)).lower()
-        headings = " ".join(re.findall(r"^#{1,3}\s+(.*)", text, re.M)).lower()
-        tags = " ".join(fm.get("tags", []) if isinstance(fm.get("tags"), list) else []).lower()
+        body = _fold(text)
+        title = _fold(str(fm.get("title", "")) + " " + _slug(p))
+        headings = _fold(" ".join(re.findall(r"^#{1,3}\s+(.*)", text, re.M)))
+        tags = _fold(" ".join(fm.get("tags", []) if isinstance(fm.get("tags"), list) else []))
         doclen = max(1, body.count(" "))
         docs.append((p, fm, body, title, headings, tags, doclen))
         for t in qset:

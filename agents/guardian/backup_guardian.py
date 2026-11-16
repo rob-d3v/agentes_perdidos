@@ -457,25 +457,24 @@ def cleanup_local(cfg: dict, keep: int | None = None, only_b2_ok: bool = False) 
 
 
 def format_report(cfg: dict, info: dict, b2_on: bool) -> str:
-    emoji = "✅" if info["status"] == "success" else "⚠️"
-    head = "SUCESSO" if info["status"] == "success" else "PARCIAL"
-    ok = sum(1 for r in info["items"].values() if r["status"] == "OK")
-    week_fail = sum(1 for r in info["items"].values() if r["b2"] == "daily+weekly-FAIL")
-    week_mark = ""
-    if info["weekly"]:
-        week_mark = f" • semana ⚠️ ({week_fail})" if week_fail else " • semana ✓"
-    msg = (f"🛡️ GUARDIAN BACKUP [{cfg['host_label']}] {emoji}\n\n"
-           f"📊 {head} — {ok}/{len(info['items'])} volumes\n"
-           f"💾 {info['total_size']} em {info['duration']}\n"
-           f"☁️ Backblaze: {'ON (3 diários + 3 semanais)' if b2_on else 'OFF'}"
-           f"{week_mark}\n"
-           f"📁 Local: {cfg['local_keep']} cópia\n\n📦 VOLUMES:")
-    for name, r in info["items"].items():
-        mk = "✓" if r["status"] == "OK" else "✗"
-        b2m = {"daily": "☁️", "daily+weekly": "☁️📅", "daily+weekly-FAIL": "☁️⚠️📅",
-               "B2-FAIL": "⚠️☁️", "skip": "·"}.get(r["b2"], "·")
-        msg += f"\n{mk} {name}: {r['size']} {b2m}"
-    msg += f"\n\n{datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    """One line when everything worked; the volume list only names what failed.
+
+    The full per-volume list was ~40 lines per host every night and nobody read it.
+    """
+    items = info["items"]
+    ok = sum(1 for r in items.values() if r["status"] == "OK")
+    cloud_bad = [n for n, r in items.items() if r["b2"] in ("B2-FAIL", "daily+weekly-FAIL")]
+    failed = [n for n, r in items.items() if r["status"] != "OK"]
+    good = info["status"] == "success" and not cloud_bad and not failed
+    cloud = ("nuvem ok" if not cloud_bad else f"nuvem falhou em {len(cloud_bad)}") if b2_on else "nuvem DESLIGADA"
+    week = " · cópia semanal ok" if info["weekly"] and not cloud_bad else ""
+    msg = (f"🛡️ Backup {cfg['host_label']} {'✅' if good else '⚠️'} "
+           f"{ok}/{len(items)} · {info['total_size']} · {info['duration']} · {cloud}{week}")
+    for name in failed:
+        msg += f"\n✗ {name}"
+    for name in cloud_bad:
+        if name not in failed:
+            msg += f"\n☁️✗ {name}"
     return msg
 
 

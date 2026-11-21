@@ -44,6 +44,9 @@ def load_config() -> dict:
     cfg.setdefault("b2_daily_keep", 3)
     cfg.setdefault("b2_weekly_keep", 3)
     cfg.setdefault("tar_timeout", 1800)
+    # Paths skipped inside every volume tar (busybox --exclude globs). Throwaway browser profiles
+    # (Puppeteer/Chrome) churn while a render runs: tar then fails on files deleted mid-read.
+    cfg.setdefault("tar_excludes", ["puppeteer_dev_chrome_profile-*"])
     # Objects bigger than this are NOT weekly-copied server-side (see b2_weekly_snapshot).
     cfg.setdefault("weekly_copy_max_bytes", 512 * 1024 * 1024)
     # Lifecycle safety net: how long a superseded (noncurrent) version may survive.
@@ -288,14 +291,15 @@ def human(nbytes: int) -> str:
     return f"{nbytes}B"
 
 
-def tar_volume(volume: str, dest_dir: str, timeout: int) -> tuple[bool, str, int]:
+def tar_volume(volume: str, dest_dir: str, timeout: int, excludes: list[str] | None = None) -> tuple[bool, str, int]:
     """tar.gz a docker volume into dest_dir via a throwaway alpine container."""
     safe = volume.replace("/", "_").replace("\\", "_")
     out_file = os.path.join(dest_dir, f"{safe}.tar.gz")
     cmd = ["docker", "run", "--rm",
            "-v", f"{volume}:/data:ro",
            "-v", f"{dest_dir}:/backup",
-           "alpine", "tar", "czf", f"/backup/{safe}.tar.gz", "-C", "/data", "."]
+           "alpine", "tar", "czf", f"/backup/{safe}.tar.gz",
+           *[f"--exclude={p}" for p in (excludes or [])], "-C", "/data", "."]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if r.returncode == 0 and os.path.exists(out_file):
         return True, out_file, os.path.getsize(out_file)
@@ -361,7 +365,7 @@ def run_backup(cfg: dict) -> int:
     start = time.time()
     for v in vols:
         log(f"backing up {v} ...")
-        ok, path, size = tar_volume(v, folder, cfg["tar_timeout"])
+        ok, path, size = tar_volume(v, folder, cfg["tar_timeout"], cfg["tar_excludes"])
         rec = {"status": "OK" if ok else "FAIL", "size": human(size), "bytes": size}
         b2_status = "skip"
         if ok and s3:

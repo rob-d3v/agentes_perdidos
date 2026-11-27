@@ -19,7 +19,7 @@ Companion: restore_guardian.py rebuilds volumes from B2 on a fresh machine (DR).
 """
 from __future__ import annotations
 import json, os, re, shutil, subprocess, sys, time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 CONFIG_PATH = os.environ.get("GUARDIAN_CONFIG", "/etc/guardian/config.json")
 
@@ -329,6 +329,28 @@ def send_whatsapp(cfg: dict, message: str) -> bool:
         return False
 
 
+def quiet_wait_seconds(now: datetime, start: int = 22, end: int = 7) -> int:
+    """Seconds until `end`:00 when `now` falls in the quiet window [start, end), else 0."""
+    if not (now.hour >= start or now.hour < end):
+        return 0
+    wake = now.replace(hour=end, minute=0, second=0, microsecond=0)
+    if now.hour >= start:
+        wake += timedelta(days=1)
+    return max(0, int((wake - now).total_seconds()))
+
+
+def wait_quiet_hours(cfg: dict) -> None:
+    # Robson's WhatsApp is silent 22:00-07:00 (same rule as the marketing alerts): the 03:00
+    # report waits for 07:00 instead of waking him. `whatsapp.quiet_hours: []` disables it.
+    qh = (cfg.get("whatsapp") or {}).get("quiet_hours", [22, 7])
+    if not qh:
+        return
+    secs = quiet_wait_seconds(datetime.now(), int(qh[0]), int(qh[1]))
+    if secs:
+        log(f"quiet hours: holding WhatsApp report {secs // 60} min")
+        time.sleep(secs)
+
+
 # ---------------------------------------------------------------------------- run
 def run_backup(cfg: dict) -> int:
     host = cfg["host_label"]
@@ -437,6 +459,7 @@ def run_backup(cfg: dict) -> int:
     # local_keep 0 = "only in B2": never drop a set that did not fully land there.
     cleanup_local(cfg, only_b2_ok=int(cfg["local_keep"]) == 0)
     report = format_report(cfg, info, s3 is not None)
+    wait_quiet_hours(cfg)
     send_whatsapp(cfg, report)
     log(f"=== DONE {status} {ok_count}/{len(items)} vols, B2 {b2_ok}/{ok_count}, {info['total_size']} in {info['duration']} ===")
     return 0 if status == "success" else 1
